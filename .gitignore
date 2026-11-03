@@ -1,0 +1,44 @@
+# Rust
+/target/
+**/target/
+
+# Node
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+next-env.d.ts
+
+# Next.js
+.next/
+out/
+.vercel/
+
+# Build output
+dist/
+coverage/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/credentials/
+.near-credentials/
+
+# Local sandbox data
+.near/
+sandbox-data/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
