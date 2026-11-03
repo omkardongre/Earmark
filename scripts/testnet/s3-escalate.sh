@@ -7,7 +7,7 @@ set -euo pipefail
 : "${OWNER:?set OWNER, e.g. earmark.testnet}"
 NETWORK=testnet
 DAO=${DAO:-earmark-demo.sputnikv2.testnet}
-CONTRACT=${CONTRACT:-v2.$OWNER}
+CONTRACT=${CONTRACT:-v3.$OWNER}
 TOKEN=${TOKEN:-tusdc.$OWNER}
 SPENDER=${SPENDER:-$OWNER}
 PAYEE=${PAYEE:-$OWNER}

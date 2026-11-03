@@ -8,9 +8,11 @@ NETWORK=testnet
 FACTORY=sputnikv2.testnet
 DAO_NAME=${DAO_NAME:-earmark-demo}
 DAO="$DAO_NAME.$FACTORY"
-CONTRACT=${CONTRACT:-v2.$OWNER}
+CONTRACT=${CONTRACT:-v3.$OWNER}
 TOKEN=${TOKEN:-tusdc.$OWNER}
 LOOSEN_DELAY_SECS=${LOOSEN_DELAY_SECS:-120}
+# Demo eligibility for a limit raise: 3 paid requests over 1 day, no for-cause reject in 30 days.
+ELIGIBILITY=${ELIGIBILITY:-'{"min_paid_count":3,"min_history_secs":"86400","cause_cooldown_secs":"2592000"}'}
 WASM=${WASM:-target/near/earmark/earmark.wasm}
 
 rpc() {
@@ -39,11 +41,11 @@ fi
 
 echo "2. Contract $CONTRACT"
 if ! exists "$CONTRACT"; then
-  near account create-account fund-myself "$CONTRACT" '5 NEAR' autogenerate-new-keypair \
+  near account create-account fund-myself "$CONTRACT" '6 NEAR' autogenerate-new-keypair \
     --signature-scheme ed25519 save-to-legacy-keychain sign-as "$OWNER" \
     network-config "$NETWORK" sign-with-legacy-keychain send
   near contract deploy "$CONTRACT" use-file "$WASM" with-init-call new \
-    json-args "{\"dao_id\":\"$DAO\",\"token_ids\":[\"$TOKEN\"],\"loosen_delay_secs\":\"$LOOSEN_DELAY_SECS\"}" \
+    json-args "{\"dao_id\":\"$DAO\",\"token_ids\":[\"$TOKEN\"],\"loosen_delay_secs\":\"$LOOSEN_DELAY_SECS\",\"eligibility\":$ELIGIBILITY}" \
     prepaid-gas '30 Tgas' attached-deposit '0 NEAR' \
     network-config "$NETWORK" sign-with-legacy-keychain send
 fi
