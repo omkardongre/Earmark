@@ -23,6 +23,7 @@ fn contract() -> Contract {
         account("club.sputnik-dao.near"),
         vec![account("usdc.near")],
         None,
+        None,
     )
 }
 
@@ -246,5 +247,136 @@ fn pending_request_expires_and_releases_reservation() {
     assert_eq!(
         c.get_request("r1".to_owned()).unwrap().status,
         crate::RequestStatus::Expired
+    );
+}
+
+fn at(predecessor: &str, secs: u64) {
+    testing_env!(
+        context(predecessor, NearToken::from_near(0))
+            .block_timestamp(secs * 1_000_000_000)
+            .build()
+    );
+}
+
+fn check(c: &Contract, id: &str, payee: &str, amount: u128, work: &str) -> crate::SpendCheck {
+    c.check_spend(
+        U64(0),
+        account("alice.near"),
+        id.to_owned(),
+        account(payee),
+        U128(amount),
+        work.to_owned(),
+    )
+}
+
+#[test]
+fn added_payee_waits_out_the_delay_and_removal_is_instant() {
+    use crate::{BlockReason, ChangeStatus};
+    let mut c = spending_contract(60);
+    at("bob.near", 0);
+    let change = c.approve_payee(U64(0), account("dave.near"));
+    assert_eq!(
+        check(&c, "r1", "dave.near", 5, "w").blocked,
+        Some(BlockReason::PayeePending)
+    );
+
+    let delay = crate::DEFAULT_LOOSEN_DELAY_SECS;
+    at("anyone.near", delay);
+    assert_eq!(c.apply_change(change), ChangeStatus::Applied);
+    assert_eq!(check(&c, "r1", "dave.near", 5, "w").blocked, None);
+
+    at("bob.near", delay);
+    c.remove_payee(U64(0), account("dave.near"));
+    assert_eq!(
+        check(&c, "r1", "dave.near", 5, "w").blocked,
+        Some(BlockReason::PayeeNotAllowed)
+    );
+}
+
+#[test]
+#[should_panic(expected = "not_yet")]
+fn queued_change_cannot_apply_early() {
+    let mut c = spending_contract(60);
+    at("bob.near", 0);
+    c.pause(U64(0), None);
+    let change = c.unpause(U64(0), None);
+    at("anyone.near", crate::DEFAULT_LOOSEN_DELAY_SECS - 1);
+    c.apply_change(change);
+}
+
+#[test]
+#[should_panic(expected = "above_ceiling")]
+fn queued_raise_fails_after_dao_lowers_ceiling() {
+    use crate::Change;
+    let mut c = spending_contract(60);
+    at("club.sputnik-dao.near", 0);
+    let queued = c.update_envelope(
+        U64(0),
+        vec![Change::SpenderAutoLimit {
+            spender: account("alice.near"),
+            amount: U128(20),
+        }],
+    );
+    c.update_envelope(U64(0), vec![Change::RaiseCeiling { amount: U128(15) }]);
+    at("anyone.near", crate::DEFAULT_LOOSEN_DELAY_SECS);
+    c.apply_change(queued[0].unwrap());
+}
+
+#[test]
+#[should_panic(expected = "not_eligible")]
+fn approver_cannot_raise_a_new_spender() {
+    let mut c = spending_contract(60);
+    at("bob.near", 0);
+    c.raise_limit(U64(0), account("alice.near"), U128(20));
+}
+
+#[test]
+fn pause_by_approver_blocks_at_once() {
+    let mut c = spending_contract(60);
+    at("bob.near", 0);
+    c.pause(U64(0), Some(account("alice.near")));
+    assert_eq!(
+        check(&c, "r1", "carol.near", 5, "w").blocked,
+        Some(crate::BlockReason::Paused)
+    );
+}
+
+#[test]
+fn override_allows_one_repeat_of_the_same_work() {
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 40, "invoice-1");
+    at("bob.near", 0);
+    c.override_duplicate(
+        U64(0),
+        account("alice.near"),
+        account("carol.near"),
+        "invoice-1".to_owned(),
+        "second instalment".to_owned(),
+    );
+    at("alice.near", 0);
+    assert_eq!(check(&c, "r2", "carol.near", 5, "invoice-1").blocked, None);
+    request(&mut c, "r2", 5, "invoice-1");
+    assert_eq!(
+        check(&c, "r3", "carol.near", 5, "invoice-1").blocked,
+        Some(crate::BlockReason::DuplicateWork)
+    );
+}
+
+#[test]
+fn close_rejects_pending_and_returns_free_balance() {
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 40, "issue-1");
+    at("club.sputnik-dao.near", 0);
+    let _ = c.close_envelope(U64(0));
+
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert!(view.closed);
+    assert_eq!(
+        (view.balance, view.committed, view.available),
+        (U128(0), U128(0), U128(0))
+    );
+    assert_eq!(
+        c.get_request("r1".to_owned()).unwrap().status,
+        crate::RequestStatus::Rejected
     );
 }
