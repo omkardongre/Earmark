@@ -3689,6 +3689,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-token"
+version = "0.1.0"
+dependencies = [
+ "near-contract-standards",
+ "near-sdk",
+]
+
+[[package]]
 name = "testresult"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

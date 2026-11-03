@@ -77,3 +77,38 @@ fn create_envelope_requires_storage_deposit() {
     testing_env!(context("club.sputnik-dao.near", NearToken::from_near(0)).build());
     c.create_envelope(input());
 }
+
+fn funded_contract() -> (Contract, U64) {
+    let mut c = contract();
+    testing_env!(context("club.sputnik-dao.near", NearToken::from_millinear(100)).build());
+    let id = c.create_envelope(input());
+    testing_env!(context("usdc.near", NearToken::from_yoctonear(1)).build());
+    (c, id)
+}
+
+#[test]
+fn dao_funds_envelope() {
+    use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+    use near_sdk::PromiseOrValue;
+
+    let (mut c, id) = funded_contract();
+    let msg = format!("{{\"envelope_id\":\"{}\"}}", id.0);
+    let refund = c.ft_on_transfer(account("club.sputnik-dao.near"), U128(300), msg);
+
+    assert!(matches!(refund, PromiseOrValue::Value(U128(0))));
+    let view = c.get_envelope(id).unwrap();
+    assert_eq!((view.balance, view.available), (U128(300), U128(300)));
+}
+
+#[test]
+fn non_dao_deposit_is_refunded() {
+    use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+    use near_sdk::PromiseOrValue;
+
+    let (mut c, id) = funded_contract();
+    let msg = format!("{{\"envelope_id\":\"{}\"}}", id.0);
+    let refund = c.ft_on_transfer(account("alice.near"), U128(300), msg);
+
+    assert!(matches!(refund, PromiseOrValue::Value(U128(300))));
+    assert_eq!(c.get_envelope(id).unwrap().balance, U128(0));
+}

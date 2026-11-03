@@ -2,6 +2,7 @@
 
 mod envelope;
 mod events;
+mod funding;
 
 use near_sdk::json_types::{U64, U128};
 use near_sdk::store::{IterableMap, IterableSet};
