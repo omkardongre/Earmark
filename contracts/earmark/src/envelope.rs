@@ -42,7 +42,12 @@ pub struct EnvelopeInput {
 pub struct SpenderLimits {
     pub auto_limit: U128,
     pub period_cap: U128,
+    /// Reserved or paid in the period starting at `period_start_ns`.
     pub period_spent: U128,
+    pub period_start_ns: U64,
+    /// Escalated requests whose DAO proposal is being filed or voted on.
+    pub open_escalations: u32,
+    pub paused: bool,
 }
 
 #[near]
@@ -143,6 +148,9 @@ impl Envelope {
                 auto_limit: spender.auto_limit,
                 period_cap: spender.period_cap,
                 period_spent: U128(0),
+                period_start_ns: U64(now_ns),
+                open_escalations: 0,
+                paused: false,
             };
             require!(
                 spenders.insert(spender.account_id, limits).is_none(),
@@ -175,6 +183,26 @@ impl Envelope {
             paused: false,
             closed: false,
         }
+    }
+
+    /// Moves the period window forward if `now_ns` is past it, resetting the period total.
+    pub fn roll_period(&mut self, now_ns: u64) {
+        let period_ns = self.period_secs * NANOS_PER_SEC;
+        let elapsed = now_ns.saturating_sub(self.period_start_ns);
+        if elapsed >= period_ns {
+            self.period_start_ns += elapsed / period_ns * period_ns;
+            self.period_spent = 0;
+        }
+    }
+
+    /// Spender limits for the current period window (call after `roll_period`).
+    pub fn spender_current(&self, spender: &AccountId) -> Option<SpenderLimits> {
+        let mut limits = self.spenders.get(spender)?.clone();
+        if limits.period_start_ns.0 != self.period_start_ns {
+            limits.period_start_ns = U64(self.period_start_ns);
+            limits.period_spent = U128(0);
+        }
+        Some(limits)
     }
 
     /// `balance - committed - in_flight`; never negative by construction (R4).

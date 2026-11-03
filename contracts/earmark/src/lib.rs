@@ -3,15 +3,18 @@
 mod envelope;
 mod events;
 mod funding;
+mod request;
+mod spend;
 
 use near_sdk::json_types::{U64, U128};
-use near_sdk::store::{IterableMap, IterableSet};
+use near_sdk::store::{IterableMap, IterableSet, LookupMap};
 use near_sdk::{
-    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, env, near, require,
+    AccountId, BorshStorageKey, CryptoHash, NearToken, PanicOnDefault, Promise, env, near, require,
 };
 
 pub use envelope::{Envelope, EnvelopeInput, EnvelopeView, SpenderInput, SpenderLimits};
 use events::Event;
+pub use request::{BlockReason, Record, Request, RequestStatus, SpendCheck, Tier};
 
 pub type EnvelopeId = u64;
 
@@ -31,6 +34,9 @@ pub(crate) enum StorageKey {
     Approvers { envelope_id: EnvelopeId },
     Spenders { envelope_id: EnvelopeId },
     Payees { envelope_id: EnvelopeId },
+    Requests,
+    WorkClaims,
+    Records,
 }
 
 #[near(contract_state)]
@@ -41,6 +47,11 @@ pub struct Contract {
     envelopes: IterableMap<EnvelopeId, Envelope>,
     next_envelope_id: EnvelopeId,
     loosen_delay_secs: u64,
+    requests: LookupMap<String, Request>,
+    /// R16: `(envelope, payee, work_ref)` -> request id; set at request, kept when paid,
+    /// freed when the request fails, is rejected or expires.
+    work_claims: LookupMap<CryptoHash, String>,
+    records: LookupMap<AccountId, Record>,
 }
 
 #[near(serializers = [json])]
@@ -73,6 +84,9 @@ impl Contract {
             envelopes: IterableMap::new(StorageKey::Envelopes),
             next_envelope_id: 0,
             loosen_delay_secs: loosen_delay_secs.map_or(DEFAULT_LOOSEN_DELAY_SECS, |d| d.0),
+            requests: LookupMap::new(StorageKey::Requests),
+            work_claims: LookupMap::new(StorageKey::WorkClaims),
+            records: LookupMap::new(StorageKey::Records),
         }
     }
 

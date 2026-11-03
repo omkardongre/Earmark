@@ -112,3 +112,98 @@ fn non_dao_deposit_is_refunded() {
     assert!(matches!(refund, PromiseOrValue::Value(U128(300))));
     assert_eq!(c.get_envelope(id).unwrap().balance, U128(0));
 }
+
+/// Budget 0 funded with `balance`, called as spender `alice.near`.
+fn spending_contract(balance: u128) -> Contract {
+    use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+    let (mut c, id) = funded_contract();
+    let msg = format!("{{\"envelope_id\":\"{}\"}}", id.0);
+    let _ = c.ft_on_transfer(account("club.sputnik-dao.near"), U128(balance), msg);
+    testing_env!(context("alice.near", NearToken::from_near(0)).build());
+    c
+}
+
+fn request(c: &mut Contract, id: &str, amount: u128, work: &str) {
+    let _ = c.request_spend(
+        U64(0),
+        id.to_owned(),
+        account("carol.near"),
+        U128(amount),
+        String::new(),
+        work.to_owned(),
+        None,
+    );
+}
+
+#[test]
+fn second_request_cannot_spend_a_reservation() {
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 40, "issue-1");
+    let check = c.check_spend(
+        U64(0),
+        account("alice.near"),
+        "r2".to_owned(),
+        account("carol.near"),
+        U128(40),
+        "issue-2".to_owned(),
+    );
+    assert_eq!(check.blocked, Some(crate::BlockReason::OverAvailable));
+
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert_eq!((view.committed, view.available), (U128(40), U128(20)));
+}
+
+#[test]
+fn escalation_reserves_nothing_and_blocks_duplicate_work() {
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 300, "invoice-7");
+    let r = c.get_request("r1".to_owned()).unwrap();
+    assert_eq!(r.tier, crate::Tier::Escalate);
+    assert_eq!(c.get_envelope(U64(0)).unwrap().available, U128(60));
+
+    let check = c.check_spend(
+        U64(0),
+        account("alice.near"),
+        "r2".to_owned(),
+        account("carol.near"),
+        U128(5),
+        "invoice-7".to_owned(),
+    );
+    assert_eq!(check.blocked, Some(crate::BlockReason::DuplicateWork));
+}
+
+#[test]
+fn failed_transfer_releases_reservation_and_work() {
+    use near_sdk::PromiseResult;
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 8, "issue-1");
+    assert_eq!(c.get_envelope(U64(0)).unwrap().in_flight, U128(8));
+
+    testing_env!(
+        context("earmark.testnet", NearToken::from_near(0)).build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![PromiseResult::Failed],
+    );
+    c.on_paid("r1".to_owned(), Err(near_sdk::PromiseError::Failed));
+
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert_eq!(
+        (view.in_flight, view.available, view.period_spent),
+        (U128(0), U128(60), U128(0))
+    );
+    assert_eq!(
+        c.get_request("r1".to_owned()).unwrap().status,
+        crate::RequestStatus::Failed
+    );
+    let retry = c.check_spend(
+        U64(0),
+        account("alice.near"),
+        "r2".to_owned(),
+        account("carol.near"),
+        U128(8),
+        "issue-1".to_owned(),
+    );
+    assert_eq!(retry.tier, Some(crate::Tier::Auto));
+}
