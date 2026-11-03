@@ -6,7 +6,7 @@ set -euo pipefail
 : "${OWNER:?set OWNER, e.g. earmark.testnet}"
 NETWORK=testnet
 DAO=${DAO:-earmark-demo.sputnikv2.testnet}
-CONTRACT=${CONTRACT:-v1.$OWNER}
+CONTRACT=${CONTRACT:-v2.$OWNER}
 TOKEN=${TOKEN:-tusdc.$OWNER}
 ENVELOPE_ID=${ENVELOPE_ID:-0}
 MINT=${MINT:-1000000000}   # 1,000 tUSDC (6 decimals)

@@ -8,7 +8,7 @@ NETWORK=testnet
 FACTORY=sputnikv2.testnet
 DAO_NAME=${DAO_NAME:-earmark-demo}
 DAO="$DAO_NAME.$FACTORY"
-CONTRACT=${CONTRACT:-v1.$OWNER}
+CONTRACT=${CONTRACT:-v2.$OWNER}
 TOKEN=${TOKEN:-tusdc.$OWNER}
 LOOSEN_DELAY_SECS=${LOOSEN_DELAY_SECS:-120}
 WASM=${WASM:-target/near/earmark/earmark.wasm}
@@ -39,7 +39,7 @@ fi
 
 echo "2. Contract $CONTRACT"
 if ! exists "$CONTRACT"; then
-  near account create-account fund-myself "$CONTRACT" '3 NEAR' autogenerate-new-keypair \
+  near account create-account fund-myself "$CONTRACT" '5 NEAR' autogenerate-new-keypair \
     --signature-scheme ed25519 save-to-legacy-keychain sign-as "$OWNER" \
     network-config "$NETWORK" sign-with-legacy-keychain send
   near contract deploy "$CONTRACT" use-file "$WASM" with-init-call new \

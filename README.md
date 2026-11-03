@@ -17,6 +17,6 @@ make lint      # rustfmt, clippy, biome
 | `contracts/test-token` | NEP-141 test stablecoin for testnet and sandbox (owner can mint) |
 | `apps/web` | Web app (Next.js) |
 | `scripts` | Node scripts for verification and rule preview |
-| `scripts/testnet` | Testnet setup: `OWNER=<you>.testnet scripts/testnet/s1-create-envelope.sh` creates a Sputnik DAO, deploys the contract and has the DAO create a budget; `s2-fund-envelope.sh` deploys the test token and has the DAO fund it |
+| `scripts/testnet` | Testnet setup: `OWNER=<you>.testnet scripts/testnet/s1-create-envelope.sh` creates a Sputnik DAO, deploys the contract and has the DAO create a budget; `s2-fund-envelope.sh` deploys the test token and has the DAO fund it; `s3-escalate.sh` sends a large request to a DAO vote |
 
-Testnet: contract `v1.earmark.testnet`, DAO `earmark-demo.sputnikv2.testnet`, token `tusdc.earmark.testnet`.
+Testnet: contract `v2.earmark.testnet`, DAO `earmark-demo.sputnikv2.testnet`, token `tusdc.earmark.testnet`.
