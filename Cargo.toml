@@ -4,13 +4,13 @@ members = ["contracts/earmark", "contracts/test-token"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.93"
 license = "MIT"
 repository = "https://github.com/omkardongre/Earmark"
 
 [workspace.dependencies]
-near-sdk = "5.30.0"
-near-contract-standards = "5.30.0"
+near-sdk = "=5.29.1"
+near-contract-standards = "=5.29.1"
 
 [profile.release]
 codegen-units = 1

@@ -2,12 +2,13 @@
 
 ## Development
 
-Requirements: Rust (toolchain pinned in `rust-toolchain.toml`), [cargo-near](https://github.com/near/cargo-near), Node.js 24 and pnpm 10.
+Requirements: Rust (toolchain pinned in `rust-toolchain.toml`), [cargo-near](https://github.com/near/cargo-near), Node.js 24, pnpm 10 and Docker (sandbox tests).
 
 ```sh
 make install   # JS dependencies
 make build     # contract WASM
-make test      # contract tests
+make test      # contract unit tests
+make test-sandbox  # integration tests on a local NEAR node (Docker)
 make lint      # rustfmt, clippy, biome
 ```
 
