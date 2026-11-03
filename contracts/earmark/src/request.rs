@@ -31,10 +31,12 @@ pub enum BlockReason {
     NotSpender,
     DuplicateRequest,
     PayeeNotAllowed,
+    PayeePending,
     DuplicateWork,
     OverAvailable,
     OverPeriodCap,
     TooManyEscalations,
+    TooManyPending,
     InvalidInput,
 }
 
@@ -46,10 +48,12 @@ impl BlockReason {
             Self::NotSpender => "not_spender",
             Self::DuplicateRequest => "duplicate_request",
             Self::PayeeNotAllowed => "payee_not_allowed",
+            Self::PayeePending => "payee_pending",
             Self::DuplicateWork => "duplicate_work",
             Self::OverAvailable => "over_available",
             Self::OverPeriodCap => "over_period_cap",
             Self::TooManyEscalations => "too_many_escalations",
+            Self::TooManyPending => "too_many_pending",
             Self::InvalidInput => "invalid_input",
         }
     }
@@ -114,6 +118,13 @@ pub fn work_key(envelope_id: EnvelopeId, payee: &AccountId, work_ref: &str) -> C
     data.extend_from_slice(payee.as_bytes());
     data.push(0);
     data.extend_from_slice(work_ref.as_bytes());
+    env::sha256_array(&data)
+}
+
+/// A one-time pass for `spender` to request the same work again (R16).
+pub fn override_key(work: &CryptoHash, spender: &AccountId) -> CryptoHash {
+    let mut data = work.to_vec();
+    data.extend_from_slice(spender.as_bytes());
     env::sha256_array(&data)
 }
 

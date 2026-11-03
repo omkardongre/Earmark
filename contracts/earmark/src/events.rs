@@ -1,7 +1,7 @@
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, near};
 
-use crate::Tier;
+use crate::{Change, Tier};
 
 /// NEP-297 events, standard `earmark`.
 #[near(event_json(standard = "earmark"))]
@@ -58,4 +58,40 @@ pub enum Event<'a> {
     },
     #[event_version("1.0.0")]
     SpendExpired { request_id: &'a str },
+    #[event_version("1.0.0")]
+    DuplicateOverridden {
+        envelope_id: U64,
+        spender: &'a AccountId,
+        payee: &'a AccountId,
+        work_ref: &'a str,
+        approver: &'a AccountId,
+        reason: &'a str,
+    },
+    #[event_version("1.0.0")]
+    ChangeQueued {
+        change_id: U64,
+        envelope_id: U64,
+        change: &'a Change,
+        queued_by: &'a AccountId,
+        effective_at_ns: U64,
+    },
+    /// `change_id` is `None` for a tightening change, which applies without being queued.
+    #[event_version("1.0.0")]
+    ChangeApplied {
+        change_id: Option<U64>,
+        envelope_id: U64,
+        change: &'a Change,
+    },
+    #[event_version("1.0.0")]
+    ChangeCancelled { change_id: U64, by: &'a AccountId },
+    #[event_version("1.0.0")]
+    ChangeStale { change_id: U64 },
+    #[event_version("1.0.0")]
+    EnvelopeClosed {
+        envelope_id: U64,
+        rejected_requests: u32,
+        refund: U128,
+    },
+    #[event_version("1.0.0")]
+    CloseRefundFailed { envelope_id: U64, amount: U128 },
 }

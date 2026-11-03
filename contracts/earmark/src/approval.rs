@@ -4,10 +4,8 @@ use near_sdk::json_types::U64;
 use near_sdk::{AccountId, Promise, env, near, require};
 
 use crate::events::Event;
-use crate::request::{BlockReason, MAX_TEXT_BYTES, Request, RequestStatus};
-use crate::{Contract, ContractExt};
-
-const NANOS_PER_SEC: u64 = 1_000_000_000;
+use crate::request::{BlockReason, MAX_TEXT_BYTES, Request, RequestStatus, override_key, work_key};
+use crate::{Contract, ContractExt, NANOS_PER_SEC};
 
 #[near]
 impl Contract {
@@ -24,6 +22,7 @@ impl Contract {
         let envelope = self.envelopes.get_mut(&request.envelope_id.0).unwrap();
         envelope.committed -= request.amount.0;
         envelope.in_flight += request.amount.0;
+        envelope.pending.remove(&request_id);
         let token_id = envelope.token_id.clone();
         request.status = RequestStatus::Paying;
         request.decided_by = Some(approver.clone());
@@ -94,6 +93,45 @@ impl Contract {
         }
         .emit();
         self.release(&request_id, request, RequestStatus::Expired, None);
+    }
+}
+
+#[near]
+impl Contract {
+    /// Any approver except `spender`. Lets `spender` request the same `work_ref` for `payee` once
+    /// more, while an earlier request for it is pending or paid (R16). The reason is in the event.
+    pub fn override_duplicate(
+        &mut self,
+        envelope_id: U64,
+        spender: AccountId,
+        payee: AccountId,
+        work_ref: String,
+        reason: String,
+    ) {
+        let approver = env::predecessor_account_id();
+        require!(
+            !reason.trim().is_empty() && reason.len() <= MAX_TEXT_BYTES,
+            "invalid_reason"
+        );
+        let envelope = self
+            .envelopes
+            .get(&envelope_id.0)
+            .unwrap_or_else(|| env::panic_str("unknown_envelope"));
+        require!(envelope.approvers.contains(&approver), "not_approver");
+        require!(spender != approver, "self_approval");
+        let work = work_key(envelope_id.0, &payee, &work_ref);
+        require!(self.work_claims.contains_key(&work), "no_duplicate");
+        self.work_overrides
+            .insert(override_key(&work, &spender), ());
+        Event::DuplicateOverridden {
+            envelope_id,
+            spender: &spender,
+            payee: &payee,
+            work_ref: &work_ref,
+            approver: &approver,
+            reason: &reason,
+        }
+        .emit();
     }
 }
 

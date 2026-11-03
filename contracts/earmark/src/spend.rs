@@ -8,10 +8,11 @@ use near_sdk::{
     require,
 };
 
+use crate::envelope::MAX_PENDING;
 use crate::events::Event;
 use crate::request::{
-    BlockReason, MAX_OPEN_ESCALATIONS, Request, RequestStatus, SpendCheck, Tier, tier_for,
-    valid_text, work_key,
+    BlockReason, MAX_OPEN_ESCALATIONS, Record, Request, RequestStatus, SpendCheck, Tier,
+    override_key, tier_for, valid_text, work_key,
 };
 use crate::{Contract, ContractExt, EnvelopeId};
 
@@ -116,10 +117,19 @@ impl Contract {
             limits.period_spent = U128(limits.period_spent.0 + amount.0);
         }
         envelope.spenders.insert(spender.clone(), limits);
+        if tier == Tier::OneApprover {
+            envelope.pending.insert(request_id.clone());
+        }
         let token_id = envelope.token_id.clone();
 
-        self.work_claims
-            .insert(work_key(id, &payee, &work_ref), request_id.clone());
+        let work = work_key(id, &payee, &work_ref);
+        if self.work_claims.contains_key(&work) {
+            // evaluate() let a repeat through only with an override; it is used up here. The
+            // claim stays with the earlier request.
+            self.work_overrides.remove(&override_key(&work, &spender));
+        } else {
+            self.work_claims.insert(work, request_id.clone());
+        }
         let request = Request {
             envelope_id,
             spender: spender.clone(),
@@ -167,6 +177,11 @@ impl Contract {
 
     pub fn get_request(&self, request_id: String) -> Option<Request> {
         self.requests.get(&request_id).cloned()
+    }
+
+    /// The spender's record across budgets (R9 reads it).
+    pub fn get_record(&self, account_id: AccountId) -> Record {
+        self.records.get(&account_id).cloned().unwrap_or_default()
     }
 
     #[private]
@@ -318,14 +333,20 @@ impl Contract {
         if self.requests.contains_key(request_id) {
             return Err(BlockReason::DuplicateRequest);
         }
-        // 2. payee allowed
+        // 2. payee allowed, or approved and still in the delay
         if !envelope.payees.contains(payee) {
-            return Err(BlockReason::PayeeNotAllowed);
+            return Err(if self.payee_pending(envelope_id, payee) {
+                BlockReason::PayeePending
+            } else {
+                BlockReason::PayeeNotAllowed
+            });
         }
-        // 3. same work for the same payee, pending or paid
-        if self
-            .work_claims
-            .contains_key(&work_key(envelope_id, payee, work_ref))
+        // 3. same work for the same payee, pending or paid, unless an approver overrode it
+        let work = work_key(envelope_id, payee, work_ref);
+        if self.work_claims.contains_key(&work)
+            && !self
+                .work_overrides
+                .contains_key(&override_key(&work, spender))
         {
             return Err(BlockReason::DuplicateWork);
         }
@@ -337,6 +358,9 @@ impl Contract {
                 return Err(BlockReason::TooManyEscalations);
             }
         } else {
+            if tier == Tier::OneApprover && envelope.pending.len() >= MAX_PENDING {
+                return Err(BlockReason::TooManyPending);
+            }
             if amount > envelope.available() {
                 return Err(BlockReason::OverAvailable);
             }
@@ -426,8 +450,12 @@ impl Contract {
         if request.tier != Tier::Escalate && request.period_start_ns.0 == envelope.period_start_ns {
             envelope.period_spent = envelope.period_spent.saturating_sub(request.amount.0);
         }
-        self.work_claims
-            .remove(&work_key(id, &request.payee, &request.work_ref));
+        envelope.pending.remove(request_id);
+        // After an override the claim belongs to the earlier request for the same work.
+        let work = work_key(id, &request.payee, &request.work_ref);
+        if self.work_claims.get(&work).is_some_and(|r| r == request_id) {
+            self.work_claims.remove(&work);
+        }
         request.status = status;
         request.failure = reason.map(str::to_owned);
         self.requests.insert(request_id.to_owned(), request);

@@ -2,13 +2,14 @@ use near_sdk::json_types::{U64, U128};
 use near_sdk::store::{IterableMap, IterableSet};
 use near_sdk::{AccountId, near, require};
 
-use crate::{DEFAULT_PENDING_TTL_SECS, EnvelopeId, StorageKey, to_u128};
+use crate::{DEFAULT_PENDING_TTL_SECS, EnvelopeId, NANOS_PER_SEC, StorageKey, to_u128};
 
 const MAX_NAME_BYTES: usize = 64;
-const MAX_APPROVERS: usize = 10;
-const MAX_SPENDERS: usize = 50;
-const MAX_PAYEES: usize = 200;
-const NANOS_PER_SEC: u64 = 1_000_000_000;
+pub(crate) const MAX_APPROVERS: usize = 10;
+pub(crate) const MAX_SPENDERS: usize = 50;
+pub(crate) const MAX_PAYEES: usize = 200;
+/// Requests waiting for approval at once, so `close_envelope` can reject them all in one call.
+pub(crate) const MAX_PENDING: u32 = 50;
 
 #[near(serializers = [json])]
 pub struct SpenderInput {
@@ -70,6 +71,10 @@ pub struct Envelope {
     pub pending_ttl_secs: u64,
     pub paused: bool,
     pub closed: bool,
+    /// Requests in `pending_approval`.
+    pub pending: IterableSet<String>,
+    /// Changes in `queued`.
+    pub open_changes: u32,
 }
 
 #[near(serializers = [json])]
@@ -94,6 +99,8 @@ pub struct EnvelopeView {
     pub pending_ttl_secs: U64,
     pub paused: bool,
     pub closed: bool,
+    pub pending_requests: Vec<String>,
+    pub open_changes: u32,
 }
 
 impl Envelope {
@@ -182,6 +189,8 @@ impl Envelope {
             pending_ttl_secs,
             paused: false,
             closed: false,
+            pending: IterableSet::new(StorageKey::Pending { envelope_id: id }),
+            open_changes: 0,
         }
     }
 
@@ -236,6 +245,8 @@ impl Envelope {
             pending_ttl_secs: U64(self.pending_ttl_secs),
             paused: self.paused,
             closed: self.closed,
+            pending_requests: self.pending.iter().cloned().collect(),
+            open_changes: self.open_changes,
         }
     }
 }

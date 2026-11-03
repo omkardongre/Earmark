@@ -1,6 +1,8 @@
 //! Earmark: DAO-funded budgets with spending limits, approval tiers and escalation to DAO votes.
 
 mod approval;
+mod changes;
+mod close;
 mod envelope;
 mod events;
 mod funding;
@@ -13,6 +15,7 @@ use near_sdk::{
     AccountId, BorshStorageKey, CryptoHash, NearToken, PanicOnDefault, Promise, env, near, require,
 };
 
+pub use changes::{Change, ChangeStatus, EligibilityRules, QueuedChange};
 pub use envelope::{Envelope, EnvelopeInput, EnvelopeView, SpenderInput, SpenderLimits};
 use events::Event;
 pub use request::{BlockReason, Record, Request, RequestStatus, SpendCheck, Tier};
@@ -24,6 +27,7 @@ pub const DEFAULT_LOOSEN_DELAY_SECS: u64 = 86_400;
 /// Default time a pending request waits for approval before it expires (72 h).
 pub const DEFAULT_PENDING_TTL_SECS: u64 = 259_200;
 
+pub(crate) const NANOS_PER_SEC: u64 = 1_000_000_000;
 const MAX_TOKENS: usize = 10;
 const MAX_LIST_LIMIT: u32 = 100;
 
@@ -35,9 +39,14 @@ pub(crate) enum StorageKey {
     Approvers { envelope_id: EnvelopeId },
     Spenders { envelope_id: EnvelopeId },
     Payees { envelope_id: EnvelopeId },
+    Pending { envelope_id: EnvelopeId },
     Requests,
     WorkClaims,
+    WorkOverrides,
     Records,
+    Changes,
+    QueuedIds,
+    PendingPayees,
 }
 
 #[near(contract_state)]
@@ -52,7 +61,16 @@ pub struct Contract {
     /// R16: `(envelope, payee, work_ref)` -> request id; set at request, kept when paid,
     /// freed when the request fails, is rejected or expires.
     work_claims: LookupMap<CryptoHash, String>,
+    /// One-time passes for a repeat `work_ref`, set by an approver with a reason (R16).
+    work_overrides: LookupMap<CryptoHash, ()>,
     records: LookupMap<AccountId, Record>,
+    eligibility: EligibilityRules,
+    changes: LookupMap<u64, QueuedChange>,
+    /// Ids of changes still `queued`.
+    queued_ids: IterableSet<u64>,
+    next_change_id: u64,
+    /// `(envelope, payee)` -> queued `AddPayee` change, so the payee shows as `payee_pending`.
+    pending_payees: LookupMap<CryptoHash, u64>,
 }
 
 #[near(serializers = [json])]
@@ -60,6 +78,7 @@ pub struct ConfigView {
     pub dao_id: AccountId,
     pub token_ids: Vec<AccountId>,
     pub loosen_delay_secs: U64,
+    pub eligibility: EligibilityRules,
     pub envelope_count: U64,
 }
 
@@ -72,6 +91,7 @@ impl Contract {
         dao_id: AccountId,
         token_ids: Vec<AccountId>,
         loosen_delay_secs: Option<U64>,
+        eligibility: Option<EligibilityRules>,
     ) -> Self {
         require!(!token_ids.is_empty(), "no_tokens");
         require!(token_ids.len() <= MAX_TOKENS, "too_many_tokens");
@@ -87,7 +107,13 @@ impl Contract {
             loosen_delay_secs: loosen_delay_secs.map_or(DEFAULT_LOOSEN_DELAY_SECS, |d| d.0),
             requests: LookupMap::new(StorageKey::Requests),
             work_claims: LookupMap::new(StorageKey::WorkClaims),
+            work_overrides: LookupMap::new(StorageKey::WorkOverrides),
             records: LookupMap::new(StorageKey::Records),
+            eligibility: eligibility.unwrap_or_default(),
+            changes: LookupMap::new(StorageKey::Changes),
+            queued_ids: IterableSet::new(StorageKey::QueuedIds),
+            next_change_id: 0,
+            pending_payees: LookupMap::new(StorageKey::PendingPayees),
         }
     }
 
@@ -126,6 +152,7 @@ impl Contract {
             dao_id: self.dao_id.clone(),
             token_ids: self.token_ids.iter().cloned().collect(),
             loosen_delay_secs: U64(self.loosen_delay_secs),
+            eligibility: self.eligibility.clone(),
             envelope_count: U64(self.next_envelope_id),
         }
     }
@@ -148,7 +175,7 @@ impl Contract {
 }
 
 impl Contract {
-    fn assert_dao(&self) {
+    pub(crate) fn assert_dao(&self) {
         require!(env::predecessor_account_id() == self.dao_id, "not_dao");
     }
 }
