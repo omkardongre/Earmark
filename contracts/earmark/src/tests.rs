@@ -207,3 +207,44 @@ fn failed_transfer_releases_reservation_and_work() {
     );
     assert_eq!(retry.tier, Some(crate::Tier::Auto));
 }
+
+#[test]
+#[should_panic(expected = "self_approval")]
+fn approver_cannot_approve_own_request() {
+    use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+    let mut c = contract();
+    let mut rules = input();
+    rules.approvers.push(account("alice.near"));
+    testing_env!(context("club.sputnik-dao.near", NearToken::from_millinear(100)).build());
+    c.create_envelope(rules);
+    testing_env!(context("usdc.near", NearToken::from_yoctonear(1)).build());
+    let _ = c.ft_on_transfer(
+        account("club.sputnik-dao.near"),
+        U128(60),
+        "{\"envelope_id\":\"0\"}".to_owned(),
+    );
+    testing_env!(context("alice.near", NearToken::from_near(0)).build());
+    request(&mut c, "r1", 40, "issue-1");
+    let _ = c.approve("r1".to_owned());
+}
+
+#[test]
+fn pending_request_expires_and_releases_reservation() {
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 40, "issue-1");
+
+    let ttl_ns = crate::DEFAULT_PENDING_TTL_SECS * 1_000_000_000;
+    testing_env!(
+        context("anyone.near", NearToken::from_near(0))
+            .block_timestamp(ttl_ns)
+            .build()
+    );
+    c.expire("r1".to_owned());
+
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert_eq!((view.committed, view.available), (U128(0), U128(60)));
+    assert_eq!(
+        c.get_request("r1".to_owned()).unwrap().status,
+        crate::RequestStatus::Expired
+    );
+}

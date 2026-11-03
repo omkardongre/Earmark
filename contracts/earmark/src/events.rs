@@ -44,4 +44,18 @@ pub enum Event<'a> {
         request_id: &'a str,
         dao_proposal_id: Option<U64>,
     },
+    #[event_version("1.0.0")]
+    SpendApproved {
+        request_id: &'a str,
+        approver: &'a AccountId,
+    },
+    #[event_version("1.0.0")]
+    SpendRejected {
+        request_id: &'a str,
+        approver: &'a AccountId,
+        reason: &'a str,
+        for_cause: bool,
+    },
+    #[event_version("1.0.0")]
+    SpendExpired { request_id: &'a str },
 }

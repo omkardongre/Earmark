@@ -289,7 +289,7 @@ impl Contract {
 
 impl Contract {
     /// Check order R17, shared by `check_spend` and `request_spend`.
-    fn evaluate(
+    pub(crate) fn evaluate(
         &self,
         envelope_id: EnvelopeId,
         spender: &AccountId,
@@ -351,7 +351,7 @@ impl Contract {
         Ok(tier)
     }
 
-    fn pay(
+    pub(crate) fn pay(
         &self,
         token_id: &AccountId,
         request_id: &str,
@@ -397,9 +397,22 @@ impl Contract {
         self.requests.insert(request_id.to_owned(), request);
     }
 
-    /// Frees what the request held (reservation, period usage, work claim, escalation slot) and
-    /// marks it failed.
-    pub(crate) fn settle_failed(&mut self, request_id: &str, mut request: Request, reason: &str) {
+    /// Marks the request failed and frees what it held.
+    pub(crate) fn settle_failed(&mut self, request_id: &str, request: Request, reason: &str) {
+        log!("spend {} failed: {}", request_id, reason);
+        Event::SpendFailed { request_id, reason }.emit();
+        self.release(request_id, request, RequestStatus::Failed, Some(reason));
+    }
+
+    /// Frees period usage, work claim and escalation slot, and stores the final status. The
+    /// caller has already removed the amount from `committed` or `in_flight`.
+    pub(crate) fn release(
+        &mut self,
+        request_id: &str,
+        mut request: Request,
+        status: RequestStatus,
+        reason: Option<&str>,
+    ) {
         let id = request.envelope_id.0;
         let envelope = self.envelopes.get_mut(&id).unwrap();
         if let Some(mut limits) = envelope.spenders.get(&request.spender).cloned() {
@@ -415,10 +428,8 @@ impl Contract {
         }
         self.work_claims
             .remove(&work_key(id, &request.payee, &request.work_ref));
-        log!("spend {} failed: {}", request_id, reason);
-        Event::SpendFailed { request_id, reason }.emit();
-        request.status = RequestStatus::Failed;
-        request.failure = Some(reason.to_owned());
+        request.status = status;
+        request.failure = reason.map(str::to_owned);
         self.requests.insert(request_id.to_owned(), request);
     }
 }
