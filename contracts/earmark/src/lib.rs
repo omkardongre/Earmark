@@ -1,1 +1,160 @@
 //! Earmark: DAO-funded budgets with spending limits, approval tiers and escalation to DAO votes.
+
+mod envelope;
+mod events;
+
+use near_sdk::json_types::{U64, U128};
+use near_sdk::store::{IterableMap, IterableSet};
+use near_sdk::{
+    AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise, env, near, require,
+};
+
+pub use envelope::{Envelope, EnvelopeInput, EnvelopeView, SpenderInput, SpenderLimits};
+use events::Event;
+
+pub type EnvelopeId = u64;
+
+/// Default time a loosening change waits before it can be applied (24 h).
+pub const DEFAULT_LOOSEN_DELAY_SECS: u64 = 86_400;
+/// Default time a pending request waits for approval before it expires (72 h).
+pub const DEFAULT_PENDING_TTL_SECS: u64 = 259_200;
+
+const MAX_TOKENS: usize = 10;
+const MAX_LIST_LIMIT: u32 = 100;
+
+#[near]
+#[derive(BorshStorageKey)]
+pub(crate) enum StorageKey {
+    Tokens,
+    Envelopes,
+    Approvers { envelope_id: EnvelopeId },
+    Spenders { envelope_id: EnvelopeId },
+    Payees { envelope_id: EnvelopeId },
+}
+
+#[near(contract_state)]
+#[derive(PanicOnDefault)]
+pub struct Contract {
+    dao_id: AccountId,
+    token_ids: IterableSet<AccountId>,
+    envelopes: IterableMap<EnvelopeId, Envelope>,
+    next_envelope_id: EnvelopeId,
+    loosen_delay_secs: u64,
+}
+
+#[near(serializers = [json])]
+pub struct ConfigView {
+    pub dao_id: AccountId,
+    pub token_ids: Vec<AccountId>,
+    pub loosen_delay_secs: U64,
+    pub envelope_count: U64,
+}
+
+#[near]
+impl Contract {
+    /// Called once in the deploy transaction, by the contract account itself.
+    #[init]
+    #[private]
+    pub fn new(
+        dao_id: AccountId,
+        token_ids: Vec<AccountId>,
+        loosen_delay_secs: Option<U64>,
+    ) -> Self {
+        require!(!token_ids.is_empty(), "no_tokens");
+        require!(token_ids.len() <= MAX_TOKENS, "too_many_tokens");
+        let mut tokens = IterableSet::new(StorageKey::Tokens);
+        for token_id in token_ids {
+            require!(tokens.insert(token_id), "duplicate_token");
+        }
+        Self {
+            dao_id,
+            token_ids: tokens,
+            envelopes: IterableMap::new(StorageKey::Envelopes),
+            next_envelope_id: 0,
+            loosen_delay_secs: loosen_delay_secs.map_or(DEFAULT_LOOSEN_DELAY_SECS, |d| d.0),
+        }
+    }
+
+    /// Creates a budget. DAO only, through a `FunctionCall` proposal. The attached deposit must
+    /// cover the storage it uses; the rest is refunded to the DAO.
+    #[payable]
+    pub fn create_envelope(&mut self, envelope: EnvelopeInput) -> U64 {
+        self.assert_dao();
+        require!(
+            self.token_ids.contains(&envelope.token_id),
+            "token_not_allowed"
+        );
+
+        let storage_before = env::storage_usage();
+        let envelope_id = self.next_envelope_id;
+        self.next_envelope_id += 1;
+        let created = Envelope::new(envelope_id, envelope, env::block_timestamp());
+        let name = created.name.clone();
+        let token_id = created.token_id.clone();
+        self.envelopes.insert(envelope_id, created);
+        self.envelopes.flush();
+        let storage_used = env::storage_usage().saturating_sub(storage_before);
+
+        Event::EnvelopeCreated {
+            envelope_id: U64(envelope_id),
+            name: &name,
+            token_id: &token_id,
+        }
+        .emit();
+        charge_storage(storage_used, &self.dao_id);
+        U64(envelope_id)
+    }
+
+    pub fn get_config(&self) -> ConfigView {
+        ConfigView {
+            dao_id: self.dao_id.clone(),
+            token_ids: self.token_ids.iter().cloned().collect(),
+            loosen_delay_secs: U64(self.loosen_delay_secs),
+            envelope_count: U64(self.next_envelope_id),
+        }
+    }
+
+    pub fn get_envelope(&self, envelope_id: U64) -> Option<EnvelopeView> {
+        self.envelopes
+            .get(&envelope_id.0)
+            .map(|e| e.view(envelope_id.0))
+    }
+
+    pub fn list_envelopes(&self, from_index: Option<U64>, limit: Option<u32>) -> Vec<EnvelopeView> {
+        let limit = limit.unwrap_or(MAX_LIST_LIMIT).min(MAX_LIST_LIMIT) as usize;
+        self.envelopes
+            .iter()
+            .skip(from_index.map_or(0, |i| i.0) as usize)
+            .take(limit)
+            .map(|(id, e)| e.view(*id))
+            .collect()
+    }
+}
+
+impl Contract {
+    fn assert_dao(&self) {
+        require!(env::predecessor_account_id() == self.dao_id, "not_dao");
+    }
+}
+
+/// Requires the attached deposit to cover `bytes` of storage and refunds the excess.
+fn charge_storage(bytes: u64, refund_to: &AccountId) {
+    let cost = env::storage_byte_cost().saturating_mul(u128::from(bytes));
+    let attached = env::attached_deposit();
+    require!(
+        attached >= cost,
+        format!("insufficient_storage_deposit: need {cost}")
+    );
+    let refund = attached.saturating_sub(cost);
+    if refund > NearToken::from_yoctonear(0) {
+        Promise::new(refund_to.clone()).transfer(refund).detach();
+    }
+}
+
+/// Amounts are token base units (R15).
+pub(crate) fn to_u128(amount: U128) -> u128 {
+    amount.0
+}
+
+#[cfg(test)]
+mod tests;
