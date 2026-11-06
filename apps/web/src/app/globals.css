@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* One light design system: indigo for actions, green for money paid, amber for waiting, red for blocked. */
+@theme {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --color-ink: #0c1222;
+  --color-muted: #5d6779;
+  --color-subtle: #8b94a7;
+  --color-line: #e5e8ef;
+  --color-surface: #f6f7fb;
+  --color-brand: #4f46e5;
+  --color-brand-strong: #4338ca;
+  --color-brand-soft: #eef0ff;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 4%), 0 8px 24px -12px rgb(15 23 42 / 12%);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background:
+    radial-gradient(56rem 28rem at 90% -12%, rgb(79 70 229 / 6%), transparent 70%),
+    var(--color-surface);
+  background-attachment: fixed;
+  color: var(--color-ink);
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 3px solid rgb(79 70 229 / 30%);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(15 23 42 / 0.4);
+  backdrop-filter: blur(2px);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Disclosure chevron that turns when open. */
+details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary .chev {
+  transition: transform 0.15s ease;
+}
+details[open] > summary .chev {
+  transform: rotate(90deg);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.toast-in {
+  animation: toast-in 0.2s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-in {
+    animation: none;
+  }
+}
