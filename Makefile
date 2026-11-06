@@ -1,7 +1,9 @@
-.PHONY: install build test test-sandbox lint fmt
+.PHONY: install build test test-sandbox lint fmt verify demo web web-build
 
 # The sandbox node needs glibc >= 2.38; this image has it on any host with Docker.
 SANDBOX_IMAGE ?= rust:1.97.1-trixie
+
+TSX = scripts/node_modules/.bin/tsx
 
 install:
 	pnpm install --frozen-lockfile
@@ -27,3 +29,18 @@ lint:
 fmt:
 	cargo fmt --all
 	pnpm format
+
+# Keyless checks of the live testnet deployment (public RPC reads only).
+verify:
+	$(TSX) scripts/verify/verify.ts
+
+# Replays the recorded testnet demo from fixtures/ (no keys, no network).
+demo:
+	$(TSX) scripts/demo/demo.ts
+
+# Web app on http://localhost:3000 (testnet demo by default; see apps/web/.env.example).
+web:
+	pnpm --dir apps/web dev
+
+web-build:
+	pnpm --dir apps/web build
