@@ -1,5 +1,5 @@
 use near_sdk::json_types::{U64, U128};
-use near_sdk::store::{IterableMap, IterableSet};
+use near_sdk::store::{IterableMap, IterableSet, Vector};
 use near_sdk::{AccountId, near, require};
 
 use crate::{DEFAULT_PENDING_TTL_SECS, EnvelopeId, NANOS_PER_SEC, StorageKey, to_u128};
@@ -75,6 +75,8 @@ pub struct Envelope {
     pub pending: IterableSet<String>,
     /// Changes in `queued`.
     pub open_changes: u32,
+    /// Every request id made against this budget, oldest first (history for the app).
+    pub requests: Vector<String>,
 }
 
 #[near(serializers = [json])]
@@ -101,6 +103,7 @@ pub struct EnvelopeView {
     pub closed: bool,
     pub pending_requests: Vec<String>,
     pub open_changes: u32,
+    pub request_count: U64,
 }
 
 impl Envelope {
@@ -191,6 +194,7 @@ impl Envelope {
             closed: false,
             pending: IterableSet::new(StorageKey::Pending { envelope_id: id }),
             open_changes: 0,
+            requests: Vector::new(StorageKey::EnvelopeRequests { envelope_id: id }),
         }
     }
 
@@ -247,6 +251,7 @@ impl Envelope {
             closed: self.closed,
             pending_requests: self.pending.iter().cloned().collect(),
             open_changes: self.open_changes,
+            request_count: U64(u64::from(self.requests.len())),
         }
     }
 }

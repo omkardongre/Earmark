@@ -380,3 +380,18 @@ fn close_rejects_pending_and_returns_free_balance() {
         crate::RequestStatus::Rejected
     );
 }
+
+#[test]
+fn list_requests_returns_newest_first() {
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 5, "issue-1");
+    request(&mut c, "r2", 40, "issue-2");
+    let ids: Vec<String> = c
+        .list_requests(U64(0), None, None)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(ids, vec!["r2", "r1"]);
+    assert_eq!(c.list_requests(U64(0), Some(U64(1)), Some(1))[0].0, "r1");
+    assert_eq!(c.get_envelope(U64(0)).unwrap().request_count, U64(2));
+}

@@ -29,7 +29,7 @@ pub const DEFAULT_PENDING_TTL_SECS: u64 = 259_200;
 
 pub(crate) const NANOS_PER_SEC: u64 = 1_000_000_000;
 const MAX_TOKENS: usize = 10;
-const MAX_LIST_LIMIT: u32 = 100;
+pub(crate) const MAX_LIST_LIMIT: u32 = 100;
 
 #[near]
 #[derive(BorshStorageKey)]
@@ -47,6 +47,7 @@ pub(crate) enum StorageKey {
     Changes,
     QueuedIds,
     PendingPayees,
+    EnvelopeRequests { envelope_id: EnvelopeId },
 }
 
 #[near(contract_state)]

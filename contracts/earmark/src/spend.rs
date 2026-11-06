@@ -14,7 +14,7 @@ use crate::request::{
     BlockReason, MAX_OPEN_ESCALATIONS, Record, Request, RequestStatus, SpendCheck, Tier,
     override_key, tier_for, valid_text, work_key,
 };
-use crate::{Contract, ContractExt, EnvelopeId};
+use crate::{Contract, ContractExt, EnvelopeId, MAX_LIST_LIMIT};
 
 const GAS_FT_TRANSFER: Gas = Gas::from_tgas(10);
 const GAS_ON_PAID: Gas = Gas::from_tgas(10);
@@ -157,6 +157,11 @@ impl Contract {
         .emit();
 
         let memo = format!("earmark {request_id}");
+        self.envelopes
+            .get_mut(&id)
+            .unwrap()
+            .requests
+            .push(request_id.clone());
         self.requests.insert(request_id.clone(), request);
         match tier {
             Tier::Auto => self
@@ -177,6 +182,28 @@ impl Contract {
 
     pub fn get_request(&self, request_id: String) -> Option<Request> {
         self.requests.get(&request_id).cloned()
+    }
+
+    /// A budget's requests, newest first. `from_index` counts from the newest.
+    pub fn list_requests(
+        &self,
+        envelope_id: U64,
+        from_index: Option<U64>,
+        limit: Option<u32>,
+    ) -> Vec<(String, Request)> {
+        let Some(envelope) = self.envelopes.get(&envelope_id.0) else {
+            return vec![];
+        };
+        let limit = limit.unwrap_or(MAX_LIST_LIMIT).min(MAX_LIST_LIMIT) as usize;
+        let skip = from_index.map_or(0, |i| i.0) as usize;
+        envelope
+            .requests
+            .iter()
+            .rev()
+            .skip(skip)
+            .take(limit)
+            .filter_map(|id| Some((id.clone(), self.requests.get(id)?.clone())))
+            .collect()
     }
 
     /// The spender's record across budgets (R9 reads it).
