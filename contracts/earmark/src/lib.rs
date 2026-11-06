@@ -12,7 +12,8 @@ mod spend;
 use near_sdk::json_types::{U64, U128};
 use near_sdk::store::{IterableMap, IterableSet, LookupMap};
 use near_sdk::{
-    AccountId, BorshStorageKey, CryptoHash, NearToken, PanicOnDefault, Promise, env, near, require,
+    AccountId, BorshStorageKey, CryptoHash, Gas, NearToken, PanicOnDefault, Promise, env, near,
+    require,
 };
 
 pub use changes::{Change, ChangeStatus, EligibilityRules, QueuedChange};
@@ -30,6 +31,7 @@ pub const DEFAULT_PENDING_TTL_SECS: u64 = 259_200;
 pub(crate) const NANOS_PER_SEC: u64 = 1_000_000_000;
 const MAX_TOKENS: usize = 10;
 pub(crate) const MAX_LIST_LIMIT: u32 = 100;
+const GAS_MIGRATE: Gas = Gas::from_tgas(30);
 
 #[near]
 #[derive(BorshStorageKey)]
@@ -146,6 +148,32 @@ impl Contract {
         .emit();
         charge_storage(storage_used, &self.dao_id);
         U64(envelope_id)
+    }
+
+    /// Replaces the contract code. DAO only, through a Sputnik `UpgradeRemote` proposal: the DAO
+    /// passes a stored blob (the new wasm) as raw input. The contract account has no full-access
+    /// key, so this is the only way to change the code (R12).
+    pub fn upgrade(&self) -> Promise {
+        self.assert_dao();
+        let code = env::input().unwrap_or_else(|| env::panic_str("no_code"));
+        require!(!code.is_empty(), "no_code");
+        Promise::new(env::current_account_id())
+            .deploy_contract(code)
+            .function_call(
+                "migrate".to_owned(),
+                vec![],
+                NearToken::from_yoctonear(0),
+                GAS_MIGRATE,
+            )
+            .as_return()
+    }
+
+    /// Runs after `upgrade`. Reads the stored state as is; a release that changes the layout
+    /// converts it here.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate() -> Self {
+        env::state_read().unwrap_or_else(|| env::panic_str("no_state"))
     }
 
     pub fn get_config(&self) -> ConfigView {

@@ -395,3 +395,11 @@ fn list_requests_returns_newest_first() {
     assert_eq!(c.list_requests(U64(0), Some(U64(1)), Some(1))[0].0, "r1");
     assert_eq!(c.get_envelope(U64(0)).unwrap().request_count, U64(2));
 }
+
+#[test]
+#[should_panic(expected = "not_dao")]
+fn only_dao_can_upgrade() {
+    let c = contract();
+    testing_env!(context("earmark.testnet", NearToken::from_near(0)).build());
+    let _ = c.upgrade();
+}
