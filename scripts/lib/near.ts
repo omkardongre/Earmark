@@ -11,17 +11,35 @@ export const RPC: Record<Network, string> = {
   mainnet: process.env.NEAR_RPC_MAINNET ?? "https://rpc.mainnet.fastnear.com",
 };
 
+/** Archival nodes, tried in order: regular nodes forget transactions after a few days. */
+export const ARCHIVAL_RPC: Record<Network, string[]> = {
+  testnet: [
+    process.env.NEAR_ARCHIVAL_RPC_TESTNET ?? "https://archival-rpc.testnet.fastnear.com",
+    "https://archival-rpc.testnet.near.org",
+  ],
+  mainnet: [
+    process.env.NEAR_ARCHIVAL_RPC_MAINNET ?? "https://archival-rpc.mainnet.fastnear.com",
+    "https://archival-rpc.mainnet.near.org",
+  ],
+};
+
 export const EXPLORER: Record<Network, string> = {
   testnet: "https://testnet.nearblocks.io",
   mainnet: "https://nearblocks.io",
 };
 
-async function rpc<T>(network: Network, method: string, params: unknown): Promise<T> {
+async function rpc<T>(
+  network: Network,
+  method: string,
+  params: unknown,
+  url: string = RPC[network],
+): Promise<T> {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(RPC[network], {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      signal: AbortSignal.timeout(30_000),
     });
     if (res.status === 429 && attempt < 5) {
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
@@ -96,12 +114,20 @@ export type TxStatus = {
   }[];
 };
 
+/** Looks a transaction up on the archival nodes: each node in turn, one retry each. */
 export async function txStatus(network: Network, hash: string, sender: string): Promise<TxStatus> {
-  return rpc<TxStatus>(network, "tx", {
-    tx_hash: hash,
-    sender_account_id: sender,
-    wait_until: "FINAL",
-  });
+  const params = { tx_hash: hash, sender_account_id: sender, wait_until: "FINAL" };
+  let last: unknown;
+  for (const url of ARCHIVAL_RPC[network]) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await rpc<TxStatus>(network, "tx", params, url);
+      } catch (e) {
+        last = e;
+      }
+    }
+  }
+  throw last;
 }
 
 /** A signing account from the CLI legacy keychain. Testnet setup scripts only. */

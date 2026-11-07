@@ -2,7 +2,7 @@
 // keys, so a DAO `UpgradeRemote` proposal is the only way to change its code. Testnet only.
 //   tsx scripts/testnet/lock.ts
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { actions, baseEncode, PublicKey } from "near-api-js";
@@ -70,6 +70,13 @@ async function upgrade() {
   if (deployed !== hash) throw new Error(`code hash ${deployed} != ${hash}`);
   await view(network, CONTRACT, "get_config");
   console.log("   code hash matches and state still reads");
+  // `make verify` checks the deployed code against this hash.
+  const fixturePath = resolve(root, "fixtures/testnet-demo.json");
+  const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as { contract: string };
+  if (fixture.contract === CONTRACT) {
+    writeFileSync(fixturePath, `${JSON.stringify({ ...fixture, code_hash: hash }, null, 2)}\n`);
+    console.log("   recorded the code hash in fixtures/testnet-demo.json");
+  }
 
   console.log("3. Return the blob deposit");
   await call(owner, DAO, "remove_blob", { hash }, { gasTgas: 50 });
