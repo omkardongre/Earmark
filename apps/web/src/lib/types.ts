@@ -13,7 +13,9 @@ export type BlockReason =
   | "over_period_cap"
   | "too_many_escalations"
   | "too_many_pending"
-  | "invalid_input";
+  | "invalid_input"
+  | "too_many_requests"
+  | "insufficient_storage_float";
 
 export type RequestStatus =
   | "paying"
@@ -23,7 +25,9 @@ export type RequestStatus =
   | "paid"
   | "failed"
   | "rejected"
-  | "expired";
+  | "expired"
+  | "paid_by_dao"
+  | "escalation_closed";
 
 export type SpenderLimits = {
   auto_limit: string;
@@ -91,6 +95,14 @@ export type SpenderRecord = {
   rejected_for_cause: number;
   first_paid_at_ns: string | null;
   last_reject_at_ns: string | null;
+};
+
+/** R21: what a payee has been paid across budgets. */
+export type PayeeRecord = {
+  paid_count: number;
+  paid_total: string;
+  first_paid_at_ns: string | null;
+  last_paid_at_ns: string | null;
 };
 
 export type QueuedChange = {

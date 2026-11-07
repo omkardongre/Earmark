@@ -15,7 +15,7 @@ const WAITING: RequestStatus[] = ["pending_approval", "escalating", "escalated",
 const FILTERS: { key: Filter; label: string; match: (s: RequestStatus) => boolean }[] = [
   { key: "all", label: "All", match: () => true },
   { key: "waiting", label: "Waiting", match: (s) => WAITING.includes(s) },
-  { key: "paid", label: "Paid", match: (s) => s === "paid" },
+  { key: "paid", label: "Paid", match: (s) => s === "paid" || s === "paid_by_dao" },
 ];
 
 /**

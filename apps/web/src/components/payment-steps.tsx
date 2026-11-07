@@ -83,6 +83,10 @@ function step(e: EarmarkEvent, payee: string): string {
       return `Didn’t go through (${str("reason").replaceAll("_", " ")}); nothing was spent`;
     case "spend_expired":
       return "Expired without a decision";
+    case "escalation_settled":
+      return str("outcome") === "approved"
+        ? `DAO approved and paid ${shortName(payee)}`
+        : `DAO vote closed (${str("outcome")}); not paid`;
     case "duplicate_overridden":
       return `${shortName(str("approver"))} allowed paying the same work again: ${str("reason")}`;
     default:

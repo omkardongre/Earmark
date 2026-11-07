@@ -10,7 +10,7 @@ make build     # contract WASM
 make test      # contract unit tests
 make test-sandbox  # integration tests on a local NEAR node (Docker)
 make lint      # rustfmt, clippy, biome
-make verify    # check the live testnet deployment (no keys, no .env)
+make verify    # check the live testnet deployment (no keys, no .env; tx lookups use archival RPC)
 make demo      # replay the recorded testnet demo with tx links (no network)
 make web       # web app on http://localhost:3000, reading the testnet demo
 make web-build # production build of the web app
@@ -24,7 +24,7 @@ make web-build # production build of the web app
 | `scripts` | Node scripts for verification and rule preview |
 | `scripts/verify`, `scripts/demo` | `make verify`, `make demo`; both read `fixtures/testnet-demo.json` |
 | `fixtures` | Every transaction of the recorded testnet demo, with its expected outcome |
-| `scripts/testnet` | Testnet setup: `scripts/testnet/demo.ts setup|history|scenes|raise|close` seeds the demo and records each tx in `fixtures/`; `lock.ts` upgrades the contract through a DAO `UpgradeRemote` vote and deletes the contract's keys. Older spikes: `OWNER=<you>.testnet scripts/testnet/s1-create-envelope.sh` creates a Sputnik DAO, deploys the contract and has the DAO create a budget; `s2-fund-envelope.sh` deploys the test token and has the DAO fund it; `s3-escalate.sh` sends a large request to a DAO vote; `s5-agent-key.sh` gives the spender a temporary key that can only call `request_spend` and shows every other call refused |
+| `scripts/testnet` | Testnet setup: `scripts/testnet/demo.ts setup|history|scenes|raise|close` seeds the demo and records each tx in `fixtures/`; `lock.ts` upgrades the contract through a DAO `UpgradeRemote` vote, records the code hash in the fixture and deletes the contract's keys; `settle.ts [request_id]` records the DAO's decision on escalated requests. Older spikes: `OWNER=<you>.testnet scripts/testnet/s1-create-envelope.sh` creates a Sputnik DAO, deploys the contract and has the DAO create a budget; `s2-fund-envelope.sh` deploys the test token and has the DAO fund it; `s3-escalate.sh` sends a large request to a DAO vote; `s5-agent-key.sh` gives the spender a temporary key that can only call `request_spend` and shows every other call refused |
 
 ## Contract methods
 
@@ -33,8 +33,18 @@ make web-build # production build of the web app
 | DAO (FunctionCall proposal) | `create_envelope`, `update_envelope` (any rule change), `close_envelope`; `upgrade` (new code, `UpgradeRemote` proposal); funds a budget with a Transfer proposal with `msg` (`ft_transfer_call`) |
 | Spender (or its agent key) | `request_spend` |
 | Approver | `approve`, `reject`, `override_duplicate`, `approve_payee`, `remove_payee`, `raise_limit`, `lower_limit`, `pause`, `unpause`, `cancel_change` |
-| Anyone | `expire`, `apply_change`, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `eligible`, `list_queued`, `get_change`) |
+| Anyone | `expire`, `apply_change`, `settle_escalation`, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `get_payee_record`, `eligible`, `list_queued`, `get_change`) |
 
 Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued for `loosen_delay_secs` (120 s on testnet) and any approver or the DAO can cancel them. Changes that tighten apply at once.
+
+Safety limits:
+
+- **Escalations settle.** `settle_escalation` reads the DAO proposal and records the result: approved → `paid_by_dao`; rejected, removed, expired or moved → `escalation_closed`. Both free the lead's DAO-vote slot (max 5 open). The payment page has a "Check the DAO result" button for this.
+- **Request cap.** At most 100 requests per spender per budget period, and no new request while the contract has less than 0.5 NEAR free for storage.
+- **Approvers.** Every spender keeps an approver other than themselves (`no_other_approver`).
+- **Removal.** Removing a spender cancels their waiting changes and blocks approval of their pending requests.
+- **Payee record.** `get_payee_record` counts confirmed payments to each payee, across budgets.
+- **Escalation text.** DAO proposals use the format Trezu reads: `* Title: Earmark request <id> <br>* Notes: <memo> · by <spender> · budget <n> <br>* Url: <work link>`.
+- **Upgrades.** `migrate` converts the state layout from before these limits, so the live contract can be upgraded through a DAO vote.
 
 Testnet: contract `v4.earmark.testnet` (no access keys: only a DAO vote can change its code), DAO `earmark-demo.sputnikv2.testnet`, token `tusdc.earmark.testnet`.

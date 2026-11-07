@@ -170,6 +170,20 @@ export function activityFeed(
           chip: { label: "Expired", tone: "gray" },
         };
         break;
+      case "escalation_settled":
+        row =
+          str("outcome") === "approved"
+            ? {
+                text: `The DAO voted yes and paid ${payee}`,
+                amount: amount(),
+                chip: { label: "Paid by DAO", tone: "green" },
+              }
+            : {
+                text: `The DAO vote on paying ${payee} closed (${str("outcome")})`,
+                amount: amount(),
+                chip: { label: "Not paid", tone: "gray" },
+              };
+        break;
       case "change_queued":
         people.push(...changeAccounts(change));
         row = {

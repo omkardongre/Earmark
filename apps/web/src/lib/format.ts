@@ -56,6 +56,8 @@ export const STATUS: Record<
   failed: { label: "Failed", tone: "red" },
   rejected: { label: "Rejected", tone: "red" },
   expired: { label: "Expired", tone: "gray" },
+  paid_by_dao: { label: "Paid by DAO", tone: "green" },
+  escalation_closed: { label: "DAO vote closed", tone: "gray" },
 };
 
 /** Plain-words reason for a blocked payment, with what to do about it. */
@@ -72,6 +74,8 @@ export const BLOCKED: Record<BlockReason, string> = {
   too_many_escalations: "You have too many requests waiting for a DAO vote.",
   too_many_pending: "Too many payments are waiting for approval.",
   invalid_input: "Check the amount and the work link.",
+  too_many_requests: "You made the most payments allowed this period.",
+  insufficient_storage_float: "The contract needs a NEAR top-up before new payments.",
 };
 
 /** Contract panic text -> a plain message. */
@@ -92,6 +96,8 @@ export function errorMessage(e: unknown): string {
     too_many_queued: "Too many changes are waiting on this budget.",
     not_queued: "This change is no longer waiting.",
     expired: "This request expired.",
+    no_other_approver: "Each spender needs an approver other than themselves.",
+    not_escalated: "This payment isn't waiting for a DAO vote.",
   };
   if (code && known[code]) return known[code];
   if (/reject|cancel|denied|closed by user/i.test(text)) return "Cancelled in your wallet.";

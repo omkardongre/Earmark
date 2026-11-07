@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LocalTime } from "@/components/local-time";
 import { PaymentSteps } from "@/components/payment-steps";
+import { SettleButton } from "@/components/settle-button";
 import { Card, ExternalLink, Person, Pill } from "@/components/ui";
 import { proposalUrl, txUrl } from "@/lib/config";
 import { loadBase, requestEvents } from "@/lib/data";
@@ -71,6 +72,9 @@ export default async function PaymentPage({
             to <Person id={r.payee} /> · asked by <Person id={r.spender} />
           </p>
           {next && <p className="rounded-xl bg-amber-50 px-4 py-3 text-amber-900">{next}</p>}
+          {r.status === "escalated" && r.dao_proposal_id !== null && (
+            <SettleButton requestId={id} />
+          )}
         </div>
 
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-line pt-5">
@@ -123,7 +127,9 @@ export default async function PaymentPage({
                   ? "Why rejected"
                   : r.status === "failed"
                     ? "Why it failed"
-                    : "Reason"}
+                    : r.status === "escalation_closed"
+                      ? "DAO outcome"
+                      : "Reason"}
               </dt>
               <dd>{r.failure.replaceAll("_", " ")}</dd>
             </>
@@ -159,7 +165,7 @@ function nextStep(r: SpendRequest, expiresNs: string, ttlSecs: number): string |
     case "escalating":
       return "Creating the DAO proposal…";
     case "escalated":
-      return "Waiting for the DAO vote. It pays out if the proposal passes.";
+      return "Waiting for the DAO vote. It pays out if the proposal passes. After the vote, anyone can record the result.";
     case "paying":
       return "Sending the money…";
     default:
