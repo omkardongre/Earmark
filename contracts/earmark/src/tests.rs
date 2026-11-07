@@ -198,6 +198,8 @@ fn failed_transfer_releases_reservation_and_work() {
         c.get_request("r1".to_owned()).unwrap().status,
         crate::RequestStatus::Failed
     );
+    // R21: a failed transfer never counts for the payee.
+    assert_eq!(c.get_payee_record(account("carol.near")).paid_count, 0);
     let retry = c.check_spend(
         U64(0),
         account("alice.near"),
@@ -402,4 +404,227 @@ fn only_dao_can_upgrade() {
     let c = contract();
     testing_env!(context("earmark.testnet", NearToken::from_near(0)).build());
     let _ = c.upgrade();
+}
+
+/// Files escalation `id` (amount 300, above the one-approver limit) as DAO proposal `proposal`.
+fn escalate(c: &mut Contract, id: &str, work: &str, proposal: u64) {
+    at("alice.near", 0);
+    request(c, id, 300, work);
+    at("earmark.testnet", 0);
+    c.on_escalated(id.to_owned(), Ok(near_sdk::serde_json::json!(proposal)));
+}
+
+fn settle(
+    c: &mut Contract,
+    id: &str,
+    proposal: Result<near_sdk::serde_json::Value, ()>,
+) -> crate::RequestStatus {
+    let policy = near_sdk::serde_json::json!({ "proposal_period": "604800000000000" });
+    c.on_settle(
+        id.to_owned(),
+        proposal.map_err(|()| near_sdk::PromiseError::Failed),
+        Ok(policy),
+    )
+}
+
+fn open_escalations(c: &Contract) -> u32 {
+    let view = c.get_envelope(U64(0)).unwrap();
+    view.spenders[0].1.open_escalations
+}
+
+#[test]
+fn settle_escalation_records_each_dao_outcome() {
+    use crate::RequestStatus::{Escalated, EscalationClosed, PaidByDao};
+    use near_sdk::serde_json::json;
+    let mut c = spending_contract(60);
+    escalate(&mut c, "e1", "series-1", 1);
+    escalate(&mut c, "e2", "series-2", 2);
+    escalate(&mut c, "e3", "series-3", 3);
+    escalate(&mut c, "e4", "series-4", 4);
+    assert_eq!(open_escalations(&c), 4);
+
+    // Approved and run by the DAO: counted for spender and payee, work claim kept.
+    at("earmark.testnet", 10);
+    assert_eq!(
+        settle(&mut c, "e1", Ok(json!({ "status": "Approved" }))),
+        PaidByDao
+    );
+    assert_eq!(
+        settle(&mut c, "e1", Ok(json!({ "status": "Rejected" }))),
+        PaidByDao
+    );
+    assert_eq!(c.get_record(account("alice.near")).paid_count, 1);
+    let payee = c.get_payee_record(account("carol.near"));
+    assert_eq!((payee.paid_count, payee.paid_total), (1, U128(300)));
+    assert_eq!(
+        check(&c, "x1", "carol.near", 5, "series-1").blocked,
+        Some(crate::BlockReason::DuplicateWork)
+    );
+
+    // Rejected, and removed (Sputnik: ERR_NO_PROPOSAL): closed, work claim freed.
+    assert_eq!(
+        settle(&mut c, "e2", Ok(json!({ "status": "Rejected" }))),
+        EscalationClosed
+    );
+    assert_eq!(settle(&mut c, "e3", Err(())), EscalationClosed);
+    assert_eq!(
+        c.get_request("e3".to_owned()).unwrap().failure.as_deref(),
+        Some("removed")
+    );
+    assert_eq!(check(&c, "x2", "carol.near", 5, "series-2").blocked, None);
+
+    // Still in the vote: no change. Past the voting period: expired.
+    let open = json!({ "status": "InProgress", "submission_time": "0" });
+    assert_eq!(settle(&mut c, "e4", Ok(open.clone())), Escalated);
+    at("earmark.testnet", 604_801);
+    assert_eq!(settle(&mut c, "e4", Ok(open)), EscalationClosed);
+
+    assert_eq!(open_escalations(&c), 0);
+    assert_eq!(c.get_payee_record(account("carol.near")).paid_count, 1);
+}
+
+#[test]
+fn escalation_from_before_the_upgrade_settles_once_after_it() {
+    use near_sdk::serde_json::json;
+    let mut c = spending_contract(60);
+    escalate(&mut c, "e1", "series-1", 1);
+
+    // Write the state in the layout deployed before R18–R21, then run `migrate`.
+    let Contract {
+        dao_id,
+        token_ids,
+        envelopes,
+        next_envelope_id,
+        loosen_delay_secs,
+        requests,
+        work_claims,
+        work_overrides,
+        records,
+        eligibility,
+        changes,
+        queued_ids,
+        next_change_id,
+        pending_payees,
+        ..
+    } = c;
+    let old = crate::ContractV1 {
+        dao_id,
+        token_ids,
+        envelopes,
+        next_envelope_id,
+        loosen_delay_secs,
+        requests,
+        work_claims,
+        work_overrides,
+        records,
+        eligibility,
+        changes,
+        queued_ids,
+        next_change_id,
+        pending_payees,
+    };
+    near_sdk::env::state_write(&old);
+    drop(old);
+    let mut c = Contract::migrate();
+
+    at("earmark.testnet", 10);
+    let approved = || Ok(json!({ "status": "Approved" }));
+    assert_eq!(
+        settle(&mut c, "e1", approved()),
+        crate::RequestStatus::PaidByDao
+    );
+    assert_eq!(
+        settle(&mut c, "e1", approved()),
+        crate::RequestStatus::PaidByDao
+    );
+    assert_eq!(c.get_record(account("alice.near")).paid_count, 1);
+    assert_eq!(open_escalations(&c), 0);
+}
+
+#[test]
+fn request_cap_and_storage_float_block_new_requests() {
+    use crate::BlockReason;
+    let mut c = spending_contract(200);
+    for i in 0..crate::request::MAX_REQUESTS_PER_PERIOD {
+        at("alice.near", 0);
+        request(&mut c, &format!("r{i}"), 1, &format!("issue-{i}"));
+    }
+    assert_eq!(
+        check(&c, "next", "carol.near", 1, "issue-x").blocked,
+        Some(BlockReason::TooManyRequests)
+    );
+    // A new period resets the count.
+    at("alice.near", 2_592_000);
+    assert_eq!(check(&c, "next", "carol.near", 1, "issue-x").blocked, None);
+
+    testing_env!(
+        context("alice.near", NearToken::from_near(0))
+            .block_timestamp(2_592_000 * 1_000_000_000)
+            .account_balance(NearToken::from_millinear(1))
+            .build()
+    );
+    assert_eq!(
+        check(&c, "next", "carol.near", 1, "issue-x").blocked,
+        Some(BlockReason::InsufficientStorageFloat)
+    );
+}
+
+#[test]
+#[should_panic(expected = "no_other_approver")]
+fn cannot_leave_a_spender_as_their_own_only_approver() {
+    use crate::Change;
+    let mut c = contract();
+    let mut rules = input();
+    rules.approvers.push(account("alice.near"));
+    testing_env!(context("club.sputnik-dao.near", NearToken::from_millinear(100)).build());
+    c.create_envelope(rules);
+    c.update_envelope(
+        U64(0),
+        vec![Change::RemoveApprover {
+            approver: account("bob.near"),
+        }],
+    );
+}
+
+#[test]
+#[should_panic(expected = "not_spender")]
+fn removing_a_spender_ends_every_right() {
+    use crate::{Change, ChangeStatus};
+    let mut c = spending_contract(60);
+    request(&mut c, "r1", 40, "issue-1");
+    at("bob.near", 0);
+    c.pause(U64(0), Some(account("alice.near")));
+    let unpause = c.unpause(U64(0), Some(account("alice.near")));
+
+    at("club.sputnik-dao.near", 0);
+    c.update_envelope(
+        U64(0),
+        vec![Change::RemoveSpender {
+            spender: account("alice.near"),
+        }],
+    );
+    assert_eq!(
+        c.get_change(unpause).unwrap().status,
+        ChangeStatus::Cancelled
+    );
+    assert_eq!(c.get_envelope(U64(0)).unwrap().open_changes, 0);
+
+    // Their request waiting for approval can't be paid any more.
+    at("bob.near", 0);
+    let _ = c.approve("r1".to_owned());
+}
+
+#[test]
+fn escalation_description_uses_trezu_format_and_strips_breaks() {
+    let text = crate::request::escalation_description(
+        "e1",
+        0,
+        &account("alice.near"),
+        "Article <br>* Url: https://evil.example",
+        "https://news.example/1",
+    );
+    assert_eq!(
+        text,
+        "* Title: Earmark request e1 <br>* Notes: Article * Url: https://evil.example · by alice.near · budget 0 <br>* Url: https://news.example/1"
+    );
 }
