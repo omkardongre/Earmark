@@ -172,6 +172,11 @@ impl Envelope {
         for payee in input.payees {
             require!(payees.insert(payee), "duplicate_payee");
         }
+        let lone_approver = approvers.iter().next().filter(|_| approvers.len() == 1);
+        require!(
+            lone_approver.is_none_or(|a| !spenders.contains_key(a)),
+            "no_other_approver"
+        );
 
         Self {
             name,
@@ -206,6 +211,13 @@ impl Envelope {
             self.period_start_ns += elapsed / period_ns * period_ns;
             self.period_spent = 0;
         }
+    }
+
+    /// Start of the period `now_ns` falls in, without changing state (views use it).
+    pub fn current_period_start(&self, now_ns: u64) -> u64 {
+        let period_ns = self.period_secs * NANOS_PER_SEC;
+        let elapsed = now_ns.saturating_sub(self.period_start_ns);
+        self.period_start_ns + elapsed / period_ns * period_ns
     }
 
     /// Spender limits for the current period window (call after `roll_period`).

@@ -19,7 +19,9 @@ use near_sdk::{
 pub use changes::{Change, ChangeStatus, EligibilityRules, QueuedChange};
 pub use envelope::{Envelope, EnvelopeInput, EnvelopeView, SpenderInput, SpenderLimits};
 use events::Event;
-pub use request::{BlockReason, Record, Request, RequestStatus, SpendCheck, Tier};
+use near_sdk::borsh;
+use request::RequestCount;
+pub use request::{BlockReason, PayeeRecord, Record, Request, RequestStatus, SpendCheck, Tier};
 
 pub type EnvelopeId = u64;
 
@@ -50,6 +52,8 @@ pub(crate) enum StorageKey {
     QueuedIds,
     PendingPayees,
     EnvelopeRequests { envelope_id: EnvelopeId },
+    PayeeRecords,
+    RequestCounts,
 }
 
 #[near(contract_state)]
@@ -74,6 +78,52 @@ pub struct Contract {
     next_change_id: u64,
     /// `(envelope, payee)` -> queued `AddPayee` change, so the payee shows as `payee_pending`.
     pending_payees: LookupMap<CryptoHash, u64>,
+    /// R21: what each payee has been paid, across budgets.
+    payee_records: LookupMap<AccountId, PayeeRecord>,
+    /// R19: requests per `(envelope, spender)` in the current period.
+    request_counts: LookupMap<CryptoHash, RequestCount>,
+}
+
+/// State layout before R18–R21 (deployed as `v4.earmark.testnet`). `migrate` converts it.
+#[near]
+struct ContractV1 {
+    dao_id: AccountId,
+    token_ids: IterableSet<AccountId>,
+    envelopes: IterableMap<EnvelopeId, Envelope>,
+    next_envelope_id: EnvelopeId,
+    loosen_delay_secs: u64,
+    requests: LookupMap<String, Request>,
+    work_claims: LookupMap<CryptoHash, String>,
+    work_overrides: LookupMap<CryptoHash, ()>,
+    records: LookupMap<AccountId, Record>,
+    eligibility: EligibilityRules,
+    changes: LookupMap<u64, QueuedChange>,
+    queued_ids: IterableSet<u64>,
+    next_change_id: u64,
+    pending_payees: LookupMap<CryptoHash, u64>,
+}
+
+impl From<ContractV1> for Contract {
+    fn from(old: ContractV1) -> Self {
+        Self {
+            dao_id: old.dao_id,
+            token_ids: old.token_ids,
+            envelopes: old.envelopes,
+            next_envelope_id: old.next_envelope_id,
+            loosen_delay_secs: old.loosen_delay_secs,
+            requests: old.requests,
+            work_claims: old.work_claims,
+            work_overrides: old.work_overrides,
+            records: old.records,
+            eligibility: old.eligibility,
+            changes: old.changes,
+            queued_ids: old.queued_ids,
+            next_change_id: old.next_change_id,
+            pending_payees: old.pending_payees,
+            payee_records: LookupMap::new(StorageKey::PayeeRecords),
+            request_counts: LookupMap::new(StorageKey::RequestCounts),
+        }
+    }
 }
 
 #[near(serializers = [json])]
@@ -117,6 +167,8 @@ impl Contract {
             queued_ids: IterableSet::new(StorageKey::QueuedIds),
             next_change_id: 0,
             pending_payees: LookupMap::new(StorageKey::PendingPayees),
+            payee_records: LookupMap::new(StorageKey::PayeeRecords),
+            request_counts: LookupMap::new(StorageKey::RequestCounts),
         }
     }
 
@@ -168,12 +220,18 @@ impl Contract {
             .as_return()
     }
 
-    /// Runs after `upgrade`. Reads the stored state as is; a release that changes the layout
-    /// converts it here.
+    /// Runs after `upgrade`. Reads the current layout as is, or converts the layout from before
+    /// R18–R21. Requests, records and claims keep their storage; only the root changes.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
-        env::state_read().unwrap_or_else(|| env::panic_str("no_state"))
+        let raw = env::storage_read(b"STATE").unwrap_or_else(|| env::panic_str("no_state"));
+        if let Ok(current) = borsh::from_slice::<Self>(&raw) {
+            return current;
+        }
+        borsh::from_slice::<ContractV1>(&raw)
+            .map(Self::from)
+            .unwrap_or_else(|_| env::panic_str("unknown_state_layout"))
     }
 
     pub fn get_config(&self) -> ConfigView {

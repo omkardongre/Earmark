@@ -44,6 +44,13 @@ pub enum Event<'a> {
         request_id: &'a str,
         dao_proposal_id: Option<U64>,
     },
+    /// R18. `outcome`: `approved`, `rejected`, `removed`, `expired` or `moved`.
+    #[event_version("1.0.0")]
+    EscalationSettled {
+        request_id: &'a str,
+        dao_proposal_id: Option<U64>,
+        outcome: &'a str,
+    },
     #[event_version("1.0.0")]
     SpendApproved {
         request_id: &'a str,

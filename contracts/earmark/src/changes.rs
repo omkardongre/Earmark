@@ -65,6 +65,18 @@ pub enum Change {
 }
 
 impl Change {
+    /// The spender this change is about, if any.
+    fn spender(&self) -> Option<&AccountId> {
+        match self {
+            Self::SpenderAutoLimit { spender, .. }
+            | Self::SpenderPeriodCap { spender, .. }
+            | Self::AddSpender { spender, .. }
+            | Self::RemoveSpender { spender } => Some(spender),
+            Self::Pause { spender } | Self::Unpause { spender } => spender.as_ref(),
+            _ => None,
+        }
+    }
+
     /// R11: approvers manage payees, a spender's auto limit and pausing. The rest is DAO only.
     fn approver_may(&self) -> bool {
         matches!(
@@ -330,6 +342,11 @@ impl Contract {
             );
         }
         let now = env::block_timestamp();
+        if let Change::RemoveSpender { spender } = &change {
+            // Removal ends every right at once: queued raises, unpauses and cap changes for
+            // this spender are cancelled. Their pending requests fail `approve` (not_spender).
+            self.cancel_spender_changes(envelope_id, spender, &caller);
+        }
         if !loosening {
             self.envelopes
                 .get_mut(&envelope_id)
@@ -382,6 +399,33 @@ impl Contract {
         );
         self.queued_ids.insert(change_id);
         Some(U64(change_id))
+    }
+
+    fn cancel_spender_changes(
+        &mut self,
+        envelope_id: EnvelopeId,
+        spender: &AccountId,
+        by: &AccountId,
+    ) {
+        let ids: Vec<u64> = self
+            .queued_ids
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.changes.get(id).is_some_and(|q| {
+                    q.envelope_id.0 == envelope_id && q.change.spender() == Some(spender)
+                })
+            })
+            .collect();
+        for change_id in ids {
+            let mut queued = self.queued(change_id);
+            self.finish(change_id, &mut queued, ChangeStatus::Cancelled);
+            Event::ChangeCancelled {
+                change_id: U64(change_id),
+                by,
+            }
+            .emit();
+        }
     }
 
     /// An approver's raise of an auto limit: not their own, and only for an eligible spender.
@@ -484,6 +528,10 @@ impl Envelope {
                 if period_cap.0 > self.period_cap {
                     return Err("spender_cap_above_envelope_cap");
                 }
+                // R20: someone other than the new spender can approve their requests
+                if !self.approvers.iter().any(|a| a != spender) {
+                    return Err("no_other_approver");
+                }
                 Ok(true)
             }
             Change::RemoveSpender { spender } => limits(spender).map(|_| false),
@@ -502,6 +550,13 @@ impl Envelope {
                 }
                 if self.approvers.len() <= 1 {
                     return Err("no_approvers");
+                }
+                // R20: a lone remaining approver who is also a spender can't approve their own
+                let mut rest = self.approvers.iter().filter(|a| *a != approver);
+                if let (Some(last), None) = (rest.next(), rest.next())
+                    && self.spenders.contains_key(last)
+                {
+                    return Err("no_other_approver");
                 }
                 Ok(false)
             }

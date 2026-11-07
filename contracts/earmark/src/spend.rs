@@ -11,8 +11,9 @@ use near_sdk::{
 use crate::envelope::MAX_PENDING;
 use crate::events::Event;
 use crate::request::{
-    BlockReason, MAX_OPEN_ESCALATIONS, Record, Request, RequestStatus, SpendCheck, Tier,
-    override_key, tier_for, valid_text, work_key,
+    BlockReason, MAX_OPEN_ESCALATIONS, MAX_REQUESTS_PER_PERIOD, PayeeRecord, Record, Request,
+    RequestCount, RequestStatus, SpendCheck, Tier, escalation_description, override_key,
+    spender_key, tier_for, valid_text, work_key,
 };
 use crate::{Contract, ContractExt, EnvelopeId, MAX_LIST_LIMIT};
 
@@ -22,6 +23,8 @@ const GAS_GET_POLICY: Gas = Gas::from_tgas(10);
 const GAS_ADD_PROPOSAL: Gas = Gas::from_tgas(20);
 const GAS_ON_ESCALATED: Gas = Gas::from_tgas(10);
 const GAS_ON_POLICY: Gas = Gas::from_tgas(45);
+const GAS_GET_PROPOSAL: Gas = Gas::from_tgas(10);
+const GAS_ON_SETTLE: Gas = Gas::from_tgas(15);
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 /// NEAR kept back from the bond float for the contract's own storage growth.
 const STORAGE_RESERVE: NearToken = NearToken::from_millinear(500);
@@ -30,6 +33,7 @@ const STORAGE_RESERVE: NearToken = NearToken::from_millinear(500);
 #[allow(dead_code)]
 trait SputnikDao {
     fn get_policy(&self) -> serde_json::Value;
+    fn get_proposal(&self, id: u64) -> serde_json::Value;
     fn add_proposal(&mut self, proposal: serde_json::Value) -> u64;
 }
 
@@ -121,6 +125,14 @@ impl Contract {
             envelope.pending.insert(request_id.clone());
         }
         let token_id = envelope.token_id.clone();
+        let count = self.requests_this_period(id, &spender, period_start_ns);
+        self.request_counts.insert(
+            spender_key(id, &spender),
+            RequestCount {
+                period_start_ns,
+                count: count + 1,
+            },
+        );
 
         let work = work_key(id, &payee, &work_ref);
         if self.work_claims.contains_key(&work) {
@@ -211,6 +223,100 @@ impl Contract {
         self.records.get(&account_id).cloned().unwrap_or_default()
     }
 
+    /// What a payee has been paid across budgets (R21).
+    pub fn get_payee_record(&self, account_id: AccountId) -> PayeeRecord {
+        self.payee_records
+            .get(&account_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Anyone (R18). Reads the escalation's DAO proposal and the DAO policy, then records the
+    /// outcome: approved → `paid_by_dao`; rejected, removed, expired, moved or not found →
+    /// `escalation_closed`. Either way the spender's escalation slot is freed. Still being voted
+    /// on → no change. Call it a few blocks after the last vote: Sputnik marks a proposal
+    /// approved before its transfer runs.
+    pub fn settle_escalation(&mut self, request_id: String) -> Promise {
+        let request = self
+            .requests
+            .get(&request_id)
+            .unwrap_or_else(|| env::panic_str("unknown_request"));
+        require!(request.status == RequestStatus::Escalated, "not_escalated");
+        let proposal_id = request
+            .dao_proposal_id
+            .unwrap_or_else(|| env::panic_str("no_proposal_id"));
+        ext_dao::ext(self.dao_id.clone())
+            .with_static_gas(GAS_GET_PROPOSAL)
+            .get_proposal(proposal_id.0)
+            .and(
+                ext_dao::ext(self.dao_id.clone())
+                    .with_static_gas(GAS_GET_POLICY)
+                    .get_policy(),
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_SETTLE)
+                    .on_settle(request_id),
+            )
+    }
+
+    /// Never panics on the results. Settling twice changes nothing: only `escalated` requests
+    /// move on.
+    #[private]
+    pub fn on_settle(
+        &mut self,
+        request_id: String,
+        #[callback_result] proposal: Result<serde_json::Value, PromiseError>,
+        #[callback_result] policy: Result<serde_json::Value, PromiseError>,
+    ) -> RequestStatus {
+        let request = self.requests.get(&request_id).cloned().unwrap();
+        if request.status != RequestStatus::Escalated {
+            return request.status;
+        }
+        let outcome = match &proposal {
+            // Sputnik panics with ERR_NO_PROPOSAL once a proposal is removed (spam vote, or a
+            // Trezu Requestor deleting it).
+            Err(_) => Some("removed"),
+            Ok(p) => match p.get("status").and_then(|s| s.as_str()) {
+                Some("Approved") => Some("approved"),
+                Some("Rejected") => Some("rejected"),
+                Some("Removed") => Some("removed"),
+                Some("Expired") => Some("expired"),
+                Some("Moved") => Some("moved"),
+                // Past the voting period it can only finalize as expired.
+                Some("InProgress" | "Failed") if past_vote_period(p, policy.as_ref().ok()) => {
+                    Some("expired")
+                }
+                _ => None,
+            },
+        };
+        let Some(outcome) = outcome else {
+            return RequestStatus::Escalated;
+        };
+        Event::EscalationSettled {
+            request_id: &request_id,
+            dao_proposal_id: request.dao_proposal_id,
+            outcome,
+        }
+        .emit();
+        if outcome == "approved" {
+            self.free_escalation_slot(&request);
+            self.count_payment(&request);
+            let mut request = request;
+            request.status = RequestStatus::PaidByDao;
+            self.requests.insert(request_id, request);
+            RequestStatus::PaidByDao
+        } else {
+            self.release(
+                &request_id,
+                request,
+                RequestStatus::EscalationClosed,
+                Some(outcome),
+            );
+            RequestStatus::EscalationClosed
+        }
+    }
+
     #[private]
     pub fn on_paid(
         &mut self,
@@ -262,9 +368,12 @@ impl Contract {
             .unwrap()
             .token_id
             .clone();
-        let description = format!(
-            "Earmark request {request_id} (budget {}): {} to {}. Work: {}. {}",
-            request.envelope_id.0, request.amount.0, request.payee, request.work_ref, request.memo
+        let description = escalation_description(
+            &request_id,
+            request.envelope_id.0,
+            &request.spender,
+            &request.memo,
+            &request.work_ref,
         );
         let proposal = json!({
             "description": description,
@@ -360,6 +469,15 @@ impl Contract {
         if self.requests.contains_key(request_id) {
             return Err(BlockReason::DuplicateRequest);
         }
+        // R19: count of requests per period, and NEAR left for the storage a request uses
+        let period_start = envelope.current_period_start(env::block_timestamp());
+        if self.requests_this_period(envelope_id, spender, period_start) >= MAX_REQUESTS_PER_PERIOD
+        {
+            return Err(BlockReason::TooManyRequests);
+        }
+        if free_near() < STORAGE_RESERVE {
+            return Err(BlockReason::InsufficientStorageFloat);
+        }
         // 2. payee allowed, or approved and still in the delay
         if !envelope.payees.contains(payee) {
             return Err(if self.payee_pending(envelope_id, payee) {
@@ -422,23 +540,58 @@ impl Contract {
     }
 
     fn can_pay_bond(&self, bond: NearToken) -> bool {
-        let storage = env::storage_byte_cost().saturating_mul(u128::from(env::storage_usage()));
-        let free = env::account_balance().saturating_sub(storage);
-        free >= bond.saturating_add(STORAGE_RESERVE)
+        free_near() >= bond.saturating_add(STORAGE_RESERVE)
     }
 
-    pub(crate) fn settle_paid(&mut self, request_id: &str, mut request: Request) {
-        request.status = RequestStatus::Paid;
-        let now = env::block_timestamp();
+    /// Requests `spender` made in `envelope_id` during the period starting at `period_start`.
+    pub(crate) fn requests_this_period(
+        &self,
+        envelope_id: EnvelopeId,
+        spender: &AccountId,
+        period_start: u64,
+    ) -> u32 {
+        self.request_counts
+            .get(&spender_key(envelope_id, spender))
+            .filter(|c| c.period_start_ns == period_start)
+            .map_or(0, |c| c.count)
+    }
+
+    /// A confirmed payment: counts for the spender's record (R9) and the payee's record (R21).
+    fn count_payment(&mut self, request: &Request) {
+        let now = U64(env::block_timestamp());
+        let amount = request.amount.0;
         let mut record = self
             .records
             .get(&request.spender)
             .cloned()
             .unwrap_or_default();
         record.paid_count += 1;
-        record.paid_total = U128(record.paid_total.0 + request.amount.0);
-        record.first_paid_at_ns.get_or_insert(U64(now));
+        record.paid_total = U128(record.paid_total.0.saturating_add(amount));
+        record.first_paid_at_ns.get_or_insert(now);
         self.records.insert(request.spender.clone(), record);
+
+        let mut payee = self
+            .payee_records
+            .get(&request.payee)
+            .cloned()
+            .unwrap_or_default();
+        payee.paid_count += 1;
+        payee.paid_total = U128(payee.paid_total.0.saturating_add(amount));
+        payee.first_paid_at_ns.get_or_insert(now);
+        payee.last_paid_at_ns = Some(now);
+        self.payee_records.insert(request.payee.clone(), payee);
+    }
+
+    fn free_escalation_slot(&mut self, request: &Request) {
+        let envelope = self.envelopes.get_mut(&request.envelope_id.0).unwrap();
+        if let Some(limits) = envelope.spenders.get_mut(&request.spender) {
+            limits.open_escalations = limits.open_escalations.saturating_sub(1);
+        }
+    }
+
+    pub(crate) fn settle_paid(&mut self, request_id: &str, mut request: Request) {
+        request.status = RequestStatus::Paid;
+        self.count_payment(&request);
         Event::SpendPaid {
             request_id,
             payee: &request.payee,
@@ -486,5 +639,29 @@ impl Contract {
         request.status = status;
         request.failure = reason.map(str::to_owned);
         self.requests.insert(request_id.to_owned(), request);
+    }
+}
+
+/// The contract's NEAR not locked for storage.
+fn free_near() -> NearToken {
+    let storage = env::storage_byte_cost().saturating_mul(u128::from(env::storage_usage()));
+    env::account_balance().saturating_sub(storage)
+}
+
+/// Sputnik's expiry rule: `submission_time + proposal_period < now`. Unreadable values count
+/// as not expired, so the request just stays `escalated`.
+fn past_vote_period(proposal: &serde_json::Value, policy: Option<&serde_json::Value>) -> bool {
+    let nanos = |v: Option<&serde_json::Value>| {
+        v.and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<u64>().ok())
+                .or(v.as_u64())
+        })
+    };
+    let submitted = nanos(proposal.get("submission_time"));
+    let period = nanos(policy.and_then(|p| p.get("proposal_period")));
+    match (submitted, period) {
+        (Some(s), Some(p)) => s.saturating_add(p) < env::block_timestamp(),
+        _ => false,
     }
 }

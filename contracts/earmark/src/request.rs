@@ -9,6 +9,9 @@ pub const MAX_ID_BYTES: usize = 64;
 pub const MAX_TEXT_BYTES: usize = 256;
 /// Open escalations per spender, so a leaked key can't drain the bond and storage float.
 pub const MAX_OPEN_ESCALATIONS: u32 = 5;
+/// Requests per spender per budget period (R19). Period caps limit the amount, not the count;
+/// this stops a leaked key from locking the storage NEAR with many tiny requests.
+pub const MAX_REQUESTS_PER_PERIOD: u32 = 100;
 
 #[near(serializers = [borsh, json])]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -38,6 +41,9 @@ pub enum BlockReason {
     TooManyEscalations,
     TooManyPending,
     InvalidInput,
+    TooManyRequests,
+    /// The contract's free NEAR is below the reserve kept for storage.
+    InsufficientStorageFloat,
 }
 
 impl BlockReason {
@@ -55,6 +61,8 @@ impl BlockReason {
             Self::TooManyEscalations => "too_many_escalations",
             Self::TooManyPending => "too_many_pending",
             Self::InvalidInput => "invalid_input",
+            Self::TooManyRequests => "too_many_requests",
+            Self::InsufficientStorageFloat => "insufficient_storage_float",
         }
     }
 }
@@ -74,6 +82,10 @@ pub enum RequestStatus {
     Failed,
     Rejected,
     Expired,
+    /// R18: the DAO approved and ran the Transfer proposal. The work claim stays.
+    PaidByDao,
+    /// R18: the DAO proposal was rejected, expired, removed or moved. `failure` says which.
+    EscalationClosed,
 }
 
 #[near(serializers = [borsh, json])]
@@ -105,6 +117,61 @@ pub struct Record {
     pub rejected_for_cause: u32,
     pub first_paid_at_ns: Option<U64>,
     pub last_reject_at_ns: Option<U64>,
+}
+
+/// Payee record across budgets (R21): grows only when a payment is confirmed (budget transfer
+/// succeeded, or the DAO paid an escalation), never on failure.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Default)]
+pub struct PayeeRecord {
+    pub paid_count: u32,
+    pub paid_total: U128,
+    pub first_paid_at_ns: Option<U64>,
+    pub last_paid_at_ns: Option<U64>,
+}
+
+/// Requests a spender made in one budget period (R19).
+#[near(serializers = [borsh])]
+#[derive(Clone, Copy, Default)]
+pub struct RequestCount {
+    pub period_start_ns: u64,
+    pub count: u32,
+}
+
+/// `(envelope, spender)` key for the request count.
+pub fn spender_key(envelope_id: EnvelopeId, spender: &AccountId) -> CryptoHash {
+    let mut data = b"rc".to_vec();
+    data.extend_from_slice(&envelope_id.to_le_bytes());
+    data.extend_from_slice(spender.as_bytes());
+    env::sha256_array(&data)
+}
+
+/// Trezu's description format, so the escalation shows as a readable Payment Request there and
+/// in its alerts. `<br>` and line breaks are removed from user text so it can't add fields.
+pub fn escalation_description(
+    request_id: &str,
+    envelope_id: EnvelopeId,
+    spender: &AccountId,
+    memo: &str,
+    work_ref: &str,
+) -> String {
+    let clean = |s: &str| {
+        s.replace("<br>", " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let memo = clean(memo);
+    let notes = if memo.is_empty() {
+        format!("by {spender} · budget {envelope_id}")
+    } else {
+        format!("{memo} · by {spender} · budget {envelope_id}")
+    };
+    format!(
+        "* Title: Earmark request {} <br>* Notes: {notes} <br>* Url: {}",
+        clean(request_id),
+        clean(work_ref)
+    )
 }
 
 #[near(serializers = [json])]
