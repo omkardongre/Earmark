@@ -262,7 +262,7 @@ Each row links to NearBlocks and the raw RPC answer (`/verify/rpc/<check>`). The
 
 ### Set up a budget (`/setup`)
 
-Enter the DAO and fill in one form: name, amount, period, leads and their limits, the one-approval limit, approvers (pre-filled from the DAO's Approver role, else its council) and who can be paid. The app reads `get_policy`, checks every account exists and the limits are consistent, and lists the DAO proposals it will file in plain words, with the exact `add_proposal` JSON under Details. If the contract can't file DAO votes yet, the plan first adds it to the Requestor role (or a new role that can only file transfers). The connected wallet files the proposals. After the council approves the budget, the same page (its URL keeps the place) files the funding transfer. One contract serves one DAO.
+Enter the DAO and fill in one form: name, amount, period, leads and their limits, the one-approval limit, approvers (pre-filled from the DAO's Approver role, else its council) and who can be paid. The app reads `get_policy`, checks every account exists and the limits are consistent, and lists the DAO proposals it will file in plain words (people by name), with the exact `add_proposal` JSON and full accounts under Details. If the contract can't file DAO votes yet, the plan first adds it to the Requestor role (or a new role that can only file transfers). The connected wallet files the proposals. After the council approves the budget, the same page (its URL keeps the place) files the funding transfer. One contract serves one DAO.
 
 ### Try it (no wallet)
 

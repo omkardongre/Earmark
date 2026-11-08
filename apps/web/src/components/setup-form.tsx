@@ -2,7 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 import { accountExists, type EnvelopeInput, maxBig, validAccountId } from "@/lib/dao";
-import { money, toBase, units } from "@/lib/format";
+import { money, shortName, toBase, units } from "@/lib/format";
 import type { TokenMeta } from "@/lib/types";
 import { Avatar } from "./ui";
 
@@ -203,14 +203,14 @@ export function SetupForm({
 
       <Field
         label="Leads"
-        hint={`Who pays from the budget, and how much each can pay at once without approval (${symbol}).`}
+        hint="Who pays from the budget. Above their limit, a payment needs approval."
         error={errors.leads}
       >
         <div className="space-y-2">
           {value.leads.map((l, i) => (
-            <div key={l.key} className="flex gap-2">
+            <div key={l.key} className="flex flex-wrap items-center gap-2">
               <input
-                className={`${field} flex-1`}
+                className={`${field} min-w-48 flex-1`}
                 placeholder="lead.near"
                 aria-label={`Lead ${i + 1}`}
                 value={l.account}
@@ -218,13 +218,17 @@ export function SetupForm({
                 spellCheck={false}
                 onChange={(e) => setLead(i, { account: e.target.value })}
               />
-              <input
-                className={`${field} tabular w-24 shrink-0`}
-                inputMode="decimal"
-                aria-label={`Pays at once, lead ${i + 1}`}
-                value={l.auto}
-                onChange={(e) => setLead(i, { auto: e.target.value })}
-              />
+              <span className="flex items-center gap-2 text-sm text-muted">
+                pays up to
+                <input
+                  className={`${field} tabular w-20 shrink-0 text-base text-ink`}
+                  inputMode="decimal"
+                  aria-label={`Pays at once without approval, lead ${i + 1} (${symbol})`}
+                  value={l.auto}
+                  onChange={(e) => setLead(i, { auto: e.target.value })}
+                />
+                {symbol} at once
+              </span>
               <button
                 type="button"
                 className="shrink-0 px-2 text-xl text-subtle hover:text-ink disabled:invisible"
@@ -365,7 +369,7 @@ function AccountList({
           }`}
         >
           <Avatar id={a} />
-          <span className="truncate">{a}</span>
+          <span className="truncate">{validAccountId(a) ? shortName(a) : a}</span>
           <button
             type="button"
             className="grid size-5 place-items-center rounded-full text-subtle hover:bg-slate-200 hover:text-ink"

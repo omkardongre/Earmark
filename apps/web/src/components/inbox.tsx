@@ -659,13 +659,11 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                       .filter(([p]) => !waitingIds.has(p) && !current.includes(p));
                     return (
                       <>
-                        {current.length > 0 && (
-                          <div className="flex flex-wrap gap-x-4 gap-y-2">
-                            {current.map((p) => (
-                              <Person key={p} id={p} />
-                            ))}
+                        {current.map((p) => (
+                          <div key={p} className="flex items-center py-1">
+                            <Person id={p} />
                           </div>
-                        )}
+                        ))}
                         {waiting.map((c) => {
                           const left = countdown(nsToMs(c.effectiveNs), now);
                           return (
@@ -699,23 +697,25 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                       </>
                     );
                   })()}
-                  <AddPayee
-                    budgetId={b.id}
-                    symbol={b.symbol}
-                    delay={later}
-                    busy={busy === `p${b.id}`}
-                    run={(method, args, opts) => run(`p${b.id}`, method, args, opts)}
-                    onAdded={(payee, hash) => {
-                      remember((l) =>
-                        l.payeesQueued.set(`${b.id}|${payee}`, Date.now() + delaySecs * 1000),
-                      );
-                      toast({
-                        ok: true,
-                        text: `${shortName(payee)} can be paid in ${later}. Any approver can cancel.`,
-                        tx: hash,
-                      });
-                    }}
-                  />
+                  <div className="pt-2">
+                    <AddPayee
+                      budgetId={b.id}
+                      symbol={b.symbol}
+                      delay={later}
+                      busy={busy === `p${b.id}`}
+                      run={(method, args, opts) => run(`p${b.id}`, method, args, opts)}
+                      onAdded={(payee, hash) => {
+                        remember((l) =>
+                          l.payeesQueued.set(`${b.id}|${payee}`, Date.now() + delaySecs * 1000),
+                        );
+                        toast({
+                          ok: true,
+                          text: `${shortName(payee)} can be paid in ${later}. Any approver can cancel.`,
+                          tx: hash,
+                        });
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             );

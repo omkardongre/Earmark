@@ -12,11 +12,10 @@ import {
   ftBalance,
   ftRegistered,
   getPolicy,
-  roleMembers,
   suggestedApprovers,
   validAccountId,
 } from "@/lib/dao";
-import { money } from "@/lib/format";
+import { money, shortName } from "@/lib/format";
 import { getConfig, getToken } from "@/lib/near";
 import type { TokenMeta } from "@/lib/types";
 import {
@@ -29,7 +28,7 @@ import {
 } from "./setup-form";
 import { SetupFund } from "./setup-fund";
 import { nearAmount, type PlannedProposal, SetupReview } from "./setup-review";
-import { Button, Card, Pill } from "./ui";
+import { Button, Card } from "./ui";
 import { useWallet } from "./wallet";
 
 type Dao = {
@@ -153,13 +152,17 @@ export function SetupFlow({
     const unregistered = envelope.payees.filter((_, i) => !payeeReady[i]);
     if (unregistered.length)
       notes.push(
-        `${unregistered.join(", ")} can't receive ${meta.symbol} until they register with the token.`,
+        `${unregistered.map(shortName).join(", ")} can't receive ${meta.symbol} until they register with the token.`,
       );
     setWarnings(notes);
 
     const period = PERIODS.find((p) => p.secs === envelope.period_secs)?.label ?? "period";
     const m = (v: string) => money(v, meta);
-    const leads = envelope.spenders.map((s) => `${s.account_id} (${m(s.auto_limit)} at once)`);
+    // Names for people; the full accounts are in Details.
+    const names = (ids: string[]) => ids.map(shortName).join(", ");
+    const leads = envelope.spenders.map(
+      (s) => `${shortName(s.account_id)}, ${m(s.auto_limit)} at once`,
+    );
     const plan: PlannedProposal[] = [];
     if (fix) {
       plan.push({
@@ -186,9 +189,9 @@ export function SetupFlow({
       key: "create",
       title: `Create the budget “${envelope.name}”`,
       lines: [
-        `Leads: ${leads.join(", ")}.`,
-        `Up to ${m(envelope.one_approver_limit)} needs one approval from ${envelope.approvers.join(", ")}; more goes to a DAO vote.`,
-        `Pays only ${envelope.payees.join(", ")}.`,
+        `Leads: ${leads.join("; ")}.`,
+        `Up to ${m(envelope.one_approver_limit)} needs one approval from ${names(envelope.approvers)}; more goes to a DAO vote.`,
+        `Pays only ${names(envelope.payees)}.`,
         `Up to ${m(envelope.period_cap)} per ${period}. Approvers can raise a lead to ${m(envelope.raise_ceiling)} after a waiting period.`,
         `The DAO attaches ${nearAmount(kind.FunctionCall.actions[0]?.deposit ?? "0")} for storage; the rest is refunded.`,
       ],
@@ -235,14 +238,6 @@ export function SetupFlow({
         {daoError && <p className="text-sm text-rose-700">{daoError}</p>}
         {dao && (
           <div className="space-y-2 text-sm">
-            <div className="flex flex-wrap gap-1.5">
-              {dao.policy.roles.map((r) => (
-                <Pill key={r.name}>
-                  {r.name}
-                  {roleMembers(r).length ? ` · ${roleMembers(r).length}` : ""}
-                </Pill>
-              ))}
-            </div>
             {dao.wrongDao ? (
               <p className="text-rose-700">
                 This Earmark app works with {dao.wrongDao}. Another DAO needs its own Earmark
@@ -252,7 +247,7 @@ export function SetupFlow({
               <>
                 <p className={escalation?.ok ? "text-emerald-700" : "text-amber-800"}>
                   {escalation?.ok
-                    ? `✓ Earmark can send big payments to a DAO vote (${escalation.roles.join(", ")} role).`
+                    ? "✓ Earmark can send big payments to a DAO vote."
                     : fix?.label === "add_member_to_role"
                       ? `Earmark can't file DAO votes yet, so the plan adds it to ${fix.role}.`
                       : "Earmark can't file DAO votes yet, so the plan adds a role that can only file payments."}

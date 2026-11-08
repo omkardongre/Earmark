@@ -82,8 +82,10 @@ export function SetupReview({
         <h2 className="text-xl font-semibold tracking-tight">Review</h2>
         <p className="text-muted">
           You’ll file {plan.length === 1 ? "one proposal" : `${plan.length} proposals`} in{" "}
-          <span className="font-medium text-ink">{dao}</span>. Council votes on these; the budget
-          appears after they pass.
+          <span className="font-medium text-ink">{dao}</span>.{" "}
+          {plan.length === 1
+            ? "Your council votes on it; the budget appears after it passes."
+            : "Your council votes on them; the budget appears after they pass."}
         </p>
       </div>
 
@@ -156,25 +158,28 @@ export function SetupReview({
         </p>
       )}
 
-      <div className="flex flex-wrap gap-3">
-        {!accountId ? (
-          <Button onClick={connect}>Connect wallet</Button>
-        ) : (
-          <Button onClick={submit} disabled={busy || allDone || blocked.length > 0}>
-            {busy
-              ? "Waiting for wallet…"
-              : Object.values(states).some((s) => s.status === "error")
-                ? "Try again"
-                : `Submit ${plan.length === 1 ? "proposal" : `${plan.length} proposals`}`}
-          </Button>
-        )}
-        {/* Once something is filed, going back could file it twice. */}
-        {!Object.values(states).some((s) => s.status === "done") && (
-          <Button variant="secondary" onClick={onBack} disabled={busy}>
-            Back
-          </Button>
-        )}
-      </div>
+      {/* Once everything is filed, the voting card below is the only next step. */}
+      {!allDone && (
+        <div className="flex flex-wrap gap-3">
+          {!accountId ? (
+            <Button onClick={connect}>Connect wallet</Button>
+          ) : (
+            <Button onClick={submit} disabled={busy || allDone || blocked.length > 0}>
+              {busy
+                ? "Waiting for wallet…"
+                : Object.values(states).some((s) => s.status === "error")
+                  ? "Try again"
+                  : `Submit ${plan.length === 1 ? "proposal" : `${plan.length} proposals`}`}
+            </Button>
+          )}
+          {/* Once something is filed, going back could file it twice. */}
+          {!Object.values(states).some((s) => s.status === "done") && (
+            <Button variant="secondary" onClick={onBack} disabled={busy}>
+              Back
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
