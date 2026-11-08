@@ -1,17 +1,18 @@
-// Seeds the testnet demo (docs/04) and records every transaction in fixtures/testnet-demo.json,
+// Seeds the testnet demo (docs/04 §1) and records every transaction in fixtures/testnet-demo.json,
 // which `make demo` replays and `make verify` checks. Testnet only; keys come from the NEAR CLI
-// legacy keychain. Run the phases in order:
-//   setup    accounts, contract, budget "News contributors"
-//   history  alice's 3 earlier payouts (eligibility needs them to be 1 day old)
-//   scenes   the demo scenes up to pause
-//   raise    limit raise, ceiling and cancel (run at least 1 day after `history`)
-//   close    the DAO closes the budget
+// legacy keychain. The DAO uses the policy Trezu (NEAR Business) gives new treasuries: roles
+// Requestor / Admin / Approver, proposal bond 0. Run the phases in order:
+//   setup    accounts, contract (no keys left), DAO, Earmark as Requestor, budget "News contributors"
+//   history  funding, earlier payouts, one approval, one DAO-paid escalation, contract refusals
+//   close    the DAO closes the budget (after the video)
+// The video scenes (pay, approve, DAO vote, race, raise, pause) are done by hand in the web app.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { actions, KeyPair } from "near-api-js";
+import { actions, KeyPair, PublicKey } from "near-api-js";
 import {
+  accessKeys,
   accountExists,
   type CallResult,
   call,
@@ -23,23 +24,32 @@ import {
 
 const network: Network = "testnet";
 const OWNER = process.env.OWNER ?? "earmark.testnet";
-const CONTRACT = process.env.CONTRACT ?? `v4.${OWNER}`;
-const DAO = process.env.DAO ?? "earmark-demo.sputnikv2.testnet";
+const CONTRACT = process.env.CONTRACT ?? `budgets.${OWNER}`;
+const DAO_NAME = process.env.DAO_NAME ?? "community-news";
+const FACTORY = "sputnikv2.testnet";
+const DAO = `${DAO_NAME}.${FACTORY}`;
 const TOKEN = process.env.TOKEN ?? `tusdc.${OWNER}`;
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const WASM = resolve(root, "target/near/earmark/earmark.wasm");
 const FIXTURE = resolve(root, "fixtures/testnet-demo.json");
+const TGAS = 1_000_000_000_000n;
 
 const name = (n: string) => `${n}.${OWNER}`;
-const ALICE = name("alice");
-const BOB = name("bob");
-const COUNCIL_1 = name("council-1");
-const COUNCIL_2 = name("council-2");
-const WRITER_1 = name("writer-1");
-const WRITER_2 = name("writer-2");
-const DESIGNER = name("designer");
-const UNKNOWN = name("stranger");
+// Council: Priya is the treasurer (files DAO proposals); all three vote, 2 of 3 decide.
+const PRIYA = name("priya");
+const DANIEL = name("daniel");
+const LENA = name("lena");
+// Leads who pay contributors from the budget.
+const MAYA = name("maya");
+const THEO = name("theo");
+// Contributors.
+const SOFIA = name("sofia-reyes");
+const KENJI = name("kenji-tanaka");
+const ANA = name("ana-costa");
+const UNKNOWN = name("not-a-contributor");
+const COUNCIL = [PRIYA, DANIEL, LENA];
 const usdc = (n: number) => String(BigInt(Math.round(n * 1e6)));
+const WORK = "https://newsletter.example/2026";
 
 type Step = {
   step: string;
@@ -58,6 +68,9 @@ type Fixture = {
   dao: string;
   token: string;
   envelope_id: string;
+  /** DAO members who can file and vote on code upgrades (Admin role). */
+  admins: string[];
+  code_hash?: string;
   accounts: Record<string, string>;
   steps: Step[];
 };
@@ -70,14 +83,16 @@ function load(): Fixture {
     dao: DAO,
     token: TOKEN,
     envelope_id: "",
+    admins: COUNCIL,
     accounts: {
-      alice: ALICE,
-      bob: BOB,
-      council_1: COUNCIL_1,
-      council_2: COUNCIL_2,
-      writer_1: WRITER_1,
-      writer_2: WRITER_2,
-      designer: DESIGNER,
+      priya: PRIYA,
+      daniel: DANIEL,
+      lena: LENA,
+      maya: MAYA,
+      theo: THEO,
+      sofia: SOFIA,
+      kenji: KENJI,
+      ana: ANA,
     },
     steps: [],
   };
@@ -117,7 +132,7 @@ async function record(step: string, label: string, expect: string, signer: strin
   fixture.steps = fixture.steps.filter((s) => s.step !== step).concat(entry);
   save();
   console.log(
-    `${matches ? "ok  " : "FAIL"} ${label.padEnd(44)} -> ${r.ok ? JSON.stringify(r.value) : r.error}  ${r.hash}`,
+    `${matches ? "ok  " : "FAIL"} ${label.padEnd(46)} -> ${r.ok ? JSON.stringify(r.value) : r.error}  ${r.hash}`,
   );
   if (!matches) throw new Error(`${step}: expected ${expect}`);
 }
@@ -127,8 +142,7 @@ const as = (id: string) => keychainAccount(network, id);
 async function ensureAccount(id: string, near: string) {
   if (await accountExists(network, id)) return;
   const kp = KeyPair.fromRandom("ed25519");
-  const owner = as(OWNER);
-  await owner.signAndSendTransaction({
+  await as(OWNER).signAndSendTransaction({
     receiverId: id,
     actions: [
       actions.createAccount(),
@@ -137,9 +151,8 @@ async function ensureAccount(id: string, near: string) {
     ],
     waitUntil: "FINAL",
   });
-  const dir = `${homedir()}/.near-credentials/${network}`;
   writeFileSync(
-    `${dir}/${id}.json`,
+    `${homedir()}/.near-credentials/${network}/${id}.json`,
     JSON.stringify({
       account_id: id,
       public_key: kp.getPublicKey().toString(),
@@ -150,53 +163,117 @@ async function ensureAccount(id: string, near: string) {
   console.log(`created ${id}`);
 }
 
-/** Files a DAO proposal as the council member and approves it. Returns the approve tx. */
+/** The policy Trezu builds for a new treasury (`nt-be` `build_policy`), with thresholds as counts. */
+function trezuPolicy(requestors: string[], admins: string[], approvers: string[], need: number) {
+  const votes = (threshold: string) => ({ weight_kind: "RoleWeight", quorum: "0", threshold });
+  const admin = votes(String(need));
+  const adminKinds = [
+    "config",
+    "policy",
+    "add_member_to_role",
+    "remove_member_from_role",
+    "upgrade_self",
+    "upgrade_remote",
+    "set_vote_token",
+    "add_bounty",
+    "bounty_done",
+    "factory_info_update",
+    "policy_add_or_update_role",
+    "policy_remove_role",
+    "policy_update_default_vote_policy",
+    "policy_update_parameters",
+  ];
+  return {
+    roles: [
+      {
+        name: "Requestor",
+        kind: { Group: requestors },
+        permissions: [
+          "call:AddProposal",
+          "transfer:AddProposal",
+          "call:VoteRemove",
+          "transfer:VoteRemove",
+        ],
+        vote_policy: { transfer: votes("1"), call: votes("1") },
+      },
+      {
+        name: "Admin",
+        kind: { Group: admins },
+        permissions: adminKinds.map((k) => `${k}:*`),
+        vote_policy: Object.fromEntries(adminKinds.map((k) => [k, admin])),
+      },
+      {
+        name: "Approver",
+        kind: { Group: approvers },
+        permissions: [
+          "call:VoteReject",
+          "call:VoteApprove",
+          "call:RemoveProposal",
+          "call:Finalize",
+          "transfer:VoteReject",
+          "transfer:VoteApprove",
+          "transfer:RemoveProposal",
+          "transfer:Finalize",
+        ],
+        vote_policy: { transfer: votes(String(need)), call: votes(String(need)) },
+      },
+    ],
+    default_vote_policy: { weight_kind: "RoleWeight", quorum: "0", threshold: [1, 2] },
+    proposal_bond: "0",
+    proposal_period: "604800000000000",
+    bounty_bond: "0",
+    bounty_forgiveness_period: "604800000000000",
+  };
+}
+
+/** Priya files a proposal; council members vote until it passes. Returns the deciding vote. */
 async function daoDo(
   description: string,
   kind: object,
 ): Promise<CallResult & { proposalId: number }> {
-  const owner = as(OWNER);
   const policy = await view<{ proposal_bond: string }>(network, DAO, "get_policy");
   const added = await call(
-    owner,
+    as(PRIYA),
     DAO,
     "add_proposal",
     { proposal: { description, kind } },
-    {
-      gasTgas: 50,
-      deposit: BigInt(policy.proposal_bond),
-    },
+    { gasTgas: 50, deposit: BigInt(policy.proposal_bond) },
   );
   if (!added.ok) throw new Error(`add_proposal: ${added.error}`);
   const proposalId = Number(added.value);
-  const stored = await view<{ kind: object }>(network, DAO, "get_proposal", { id: proposalId });
-  const voted = await call(
-    owner,
-    DAO,
-    "act_proposal",
-    { id: proposalId, action: "VoteApprove", proposal: stored.kind },
-    {
-      gasTgas: 300,
-    },
-  );
-  const after = await view<{ status: string }>(network, DAO, "get_proposal", { id: proposalId });
-  if (after.status !== "Approved")
-    throw new Error(`proposal ${proposalId}: ${after.status} ${voted.error ?? ""}`);
-  return { ...voted, proposalId };
+  return { ...(await voteUntilApproved(proposalId)), proposalId };
+}
+
+async function voteUntilApproved(id: number, voters = COUNCIL): Promise<CallResult> {
+  const stored = await view<{ kind: object }>(network, DAO, "get_proposal", { id });
+  for (const voter of voters) {
+    const voted = await call(
+      as(voter),
+      DAO,
+      "act_proposal",
+      { id, action: "VoteApprove", proposal: stored.kind },
+      { gasTgas: 200 },
+    );
+    const after = await view<{ status: string }>(network, DAO, "get_proposal", { id });
+    if (after.status === "Approved") return voted;
+    if (after.status !== "InProgress") throw new Error(`proposal ${id}: ${after.status}`);
+  }
+  throw new Error(`proposal ${id} not approved by ${voters.join(", ")}`);
 }
 
 async function fund(step: string, amount: number) {
-  const owner = as(OWNER);
-  await call(owner, TOKEN, "mint", { account_id: DAO, amount: usdc(amount) }, { gasTgas: 30 });
-  const r = await daoDo(`Fund Earmark budget ${fixture.envelope_id} with ${amount} tUSDC`, {
-    Transfer: {
-      token_id: TOKEN,
-      receiver_id: CONTRACT,
-      amount: usdc(amount),
-      msg: JSON.stringify({ envelope_id: fixture.envelope_id }),
+  const r = await daoDo(
+    `* Title: Fund Earmark budget "News contributors" <br>* Notes: ${amount} tUSDC`,
+    {
+      Transfer: {
+        token_id: TOKEN,
+        receiver_id: CONTRACT,
+        amount: usdc(amount),
+        msg: JSON.stringify({ envelope_id: fixture.envelope_id }),
+      },
     },
-  });
-  await record(step, `DAO funds the budget with ${amount}`, "ok", OWNER, r);
+  );
+  await record(step, `DAO funds the budget with ${amount}`, "ok", PRIYA, r);
 }
 
 let seq = 0;
@@ -208,7 +285,8 @@ function spend(
   payee: string,
   amount: number,
   work: string,
-  requestId = rid("req"),
+  memo: string,
+  requestId = rid("pay"),
 ) {
   return call(
     as(spender),
@@ -219,7 +297,7 @@ function spend(
       request_id: requestId,
       payee,
       amount: usdc(amount),
-      memo: "",
+      memo,
       work_ref: work,
     },
     { gasTgas: 200 },
@@ -227,13 +305,29 @@ function spend(
 }
 
 async function setup() {
-  for (const id of [ALICE, BOB, COUNCIL_1, COUNCIL_2]) await ensureAccount(id, "1");
-  for (const id of [WRITER_1, WRITER_2, DESIGNER]) await ensureAccount(id, "0.2");
+  for (const id of [...COUNCIL, MAYA, THEO]) await ensureAccount(id, "0.3");
+  for (const id of [SOFIA, KENJI, ANA]) await ensureAccount(id, "0.1");
+
+  if (!(await accountExists(network, DAO))) {
+    const policy = trezuPolicy([PRIYA], COUNCIL, COUNCIL, 2);
+    const args = {
+      config: { name: DAO_NAME, purpose: "Community newsletter treasury", metadata: "" },
+      policy,
+    };
+    const created = await call(
+      as(OWNER),
+      FACTORY,
+      "create",
+      { name: DAO_NAME, args: Buffer.from(JSON.stringify(args)).toString("base64") },
+      { gasTgas: 150, deposit: NEAR("6") },
+    );
+    if (!created.ok) throw new Error(`create DAO: ${created.error}`);
+    console.log(`created DAO ${DAO}`);
+  }
 
   if (!(await accountExists(network, CONTRACT))) {
-    await ensureAccount(CONTRACT, "6");
-    const contract = as(CONTRACT);
-    await contract.signAndSendTransaction({
+    await ensureAccount(CONTRACT, "5.2");
+    await as(CONTRACT).signAndSendTransaction({
       receiverId: CONTRACT,
       actions: [
         actions.deployContract(readFileSync(WASM)),
@@ -250,7 +344,7 @@ async function setup() {
               cause_cooldown_secs: "2592000",
             },
           },
-          30n * 1_000_000_000_000n,
+          30n * TGAS,
           0n,
         ),
       ],
@@ -258,10 +352,22 @@ async function setup() {
     });
     console.log(`deployed ${CONTRACT}`);
   }
+  // No admin key (R12): from here only a DAO UpgradeRemote vote can change the code.
+  const full = (await accessKeys(network, CONTRACT)).filter(
+    (k) => k.access_key.permission === "FullAccess",
+  );
+  if (full.length > 0) {
+    await as(CONTRACT).signAndSendTransaction({
+      receiverId: CONTRACT,
+      actions: full.map((k) => actions.deleteKey(PublicKey.fromString(k.public_key))),
+      waitUntil: "FINAL",
+    });
+    console.log(`deleted ${full.length} key(s) of ${CONTRACT}`);
+  }
 
   const owner = as(OWNER);
   const bounds = await view<{ min: string }>(network, TOKEN, "storage_balance_bounds");
-  for (const id of [CONTRACT, DAO, WRITER_1, WRITER_2, DESIGNER]) {
+  for (const id of [CONTRACT, DAO, SOFIA, KENJI, ANA]) {
     const bal = await view<unknown>(network, TOKEN, "storage_balance_of", { account_id: id });
     if (!bal) {
       await call(
@@ -269,262 +375,189 @@ async function setup() {
         TOKEN,
         "storage_deposit",
         { account_id: id, registration_only: true },
-        {
-          gasTgas: 30,
-          deposit: BigInt(bounds.min),
-        },
+        { gasTgas: 30, deposit: BigInt(bounds.min) },
       );
     }
   }
 
-  const envelope = {
-    name: "News contributors",
-    token_id: TOKEN,
-    spenders: [
-      { account_id: ALICE, auto_limit: usdc(10), period_cap: usdc(200) },
-      { account_id: BOB, auto_limit: usdc(10), period_cap: usdc(200) },
-    ],
-    approvers: [COUNCIL_1, COUNCIL_2],
-    one_approver_limit: usdc(50),
-    raise_ceiling: usdc(25),
-    payees: [WRITER_1, WRITER_2, DESIGNER],
-    period_secs: "2592000",
-    period_cap: usdc(500),
-  };
-  const before = await view<{ envelope_count: string }>(network, CONTRACT, "get_config");
-  const r = await daoDo("Create Earmark budget: News contributors", {
-    FunctionCall: {
-      receiver_id: CONTRACT,
-      actions: [
-        {
-          method_name: "create_envelope",
-          args: Buffer.from(JSON.stringify({ envelope })).toString("base64"),
-          deposit: NEAR("0.1").toString(),
-          gas: "50000000000000",
-        },
+  // Earmark files escalations, so it joins Requestor (as NEARN does with nearn-io.near).
+  const policy = await view<{ roles: { name: string; kind: { Group?: string[] } }[] }>(
+    network,
+    DAO,
+    "get_policy",
+  );
+  const requestors = policy.roles.find((r) => r.name === "Requestor")?.kind.Group ?? [];
+  if (!requestors.includes(CONTRACT)) {
+    const r = await daoDo(
+      `* Title: Add Earmark as Requestor <br>* Notes: ${CONTRACT} files payments above the budget's approval limit as DAO votes`,
+      {
+        AddMemberToRole: { member_id: CONTRACT, role: "Requestor" },
+      },
+    );
+    await record("requestor", "DAO adds Earmark to the Requestor role", "ok", PRIYA, r);
+  }
+
+  if (fixture.envelope_id === "") {
+    const envelope = {
+      name: "News contributors",
+      token_id: TOKEN,
+      spenders: [
+        { account_id: MAYA, auto_limit: usdc(10), period_cap: usdc(200) },
+        { account_id: THEO, auto_limit: usdc(10), period_cap: usdc(200) },
       ],
-    },
-  });
-  fixture.envelope_id = before.envelope_count;
-  save();
-  await record("create", 'DAO creates budget "News contributors"', "ok", OWNER, r);
+      approvers: COUNCIL,
+      one_approver_limit: usdc(50),
+      raise_ceiling: usdc(25),
+      payees: [SOFIA, KENJI, ANA],
+      period_secs: "2592000",
+      period_cap: usdc(500),
+    };
+    const before = await view<{ envelope_count: string }>(network, CONTRACT, "get_config");
+    const r = await daoDo(
+      '* Title: Create Earmark budget "News contributors" <br>* Notes: leads Maya and Theo pay up to 10 at once; up to 50 with one council approval; above that, a DAO vote',
+      {
+        FunctionCall: {
+          receiver_id: CONTRACT,
+          actions: [
+            {
+              method_name: "create_envelope",
+              args: Buffer.from(JSON.stringify({ envelope })).toString("base64"),
+              deposit: NEAR("0.1").toString(),
+              gas: "50000000000000",
+            },
+          ],
+        },
+      },
+    );
+    fixture.envelope_id = before.envelope_count;
+    save();
+    await record("create", 'DAO creates budget "News contributors"', "ok", PRIYA, r);
+  }
 }
 
 async function history() {
-  await fund("history-fund", 6);
-  await record(
-    "history-1",
-    "alice pays writer-1 2 (earlier work)",
-    "ok",
-    ALICE,
-    await spend(ALICE, WRITER_1, 2, "https://news.example/history-1"),
-  );
-  await record(
-    "history-2",
-    "alice pays writer-2 2 (earlier work)",
-    "ok",
-    ALICE,
-    await spend(ALICE, WRITER_2, 2, "https://news.example/history-2"),
-  );
-  await record(
-    "history-3",
-    "alice pays designer 2 (earlier work)",
-    "ok",
-    ALICE,
-    await spend(ALICE, DESIGNER, 2, "https://news.example/history-3"),
-  );
-}
+  const owner = as(OWNER);
+  // 170 for the budget (100 left after these payouts) and 500 in the DAO's own treasury.
+  await call(owner, TOKEN, "mint", { account_id: DAO, amount: usdc(670) }, { gasTgas: 30 });
+  await fund("fund", 170);
 
-async function scenes() {
-  await fund("fund", 100);
-  const article = `https://news.example/${runId}/article-1`;
-  await record(
-    "auto",
-    "alice pays writer-1 5",
-    "ok paid",
-    ALICE,
-    await spend(ALICE, WRITER_1, 5, article),
-  );
+  const paid: [string, string, string, number, string, string][] = [
+    ["roundup-211", MAYA, SOFIA, 6, "issue-211/ecosystem-roundup", "Ecosystem roundup, issue 211"],
+    ["photos-211", MAYA, KENJI, 8, "issue-211/meetup-photos", "Meetup photos, issue 211"],
+    ["header-211", THEO, ANA, 7, "issue-211/header-art", "Header art, issue 211"],
+    ["roundup-212", MAYA, SOFIA, 6, "issue-212/ecosystem-roundup", "Ecosystem roundup, issue 212"],
+    ["charts-212", MAYA, ANA, 9, "issue-212/grant-charts", "Grant charts, issue 212"],
+    ["recap-212", THEO, SOFIA, 5, "issue-212/governance-recap", "Governance recap, issue 212"],
+  ];
+  for (const [step, lead, payee, amount, path, memo] of paid) {
+    const who = lead === MAYA ? "maya" : "theo";
+    await record(
+      step,
+      `${who} pays ${payee.split(".")[0]} ${amount}`,
+      "ok paid",
+      lead,
+      await spend(lead, payee, amount, `${WORK}/${path}`, memo),
+    );
+  }
 
-  const pendingId = rid("design");
+  const interview = rid("pay");
   await record(
-    "one-approval",
-    "alice requests 40 for designer",
+    "interview-ask",
+    "maya asks 35 for kenji (needs one approval)",
     "ok pending_approval",
-    ALICE,
-    await spend(ALICE, DESIGNER, 40, `https://news.example/${runId}/cover`, pendingId),
+    MAYA,
+    await spend(
+      MAYA,
+      KENJI,
+      35,
+      `${WORK}/issue-212/founder-interview`,
+      "Founder interview, issue 212",
+      interview,
+    ),
   );
   await record(
-    "approve",
-    "council-1 approves the 40",
+    "interview-approve",
+    "daniel approves the 35",
     "ok paid",
-    COUNCIL_1,
-    await call(as(COUNCIL_1), CONTRACT, "approve", { request_id: pendingId }, { gasTgas: 100 }),
+    DANIEL,
+    await call(as(DANIEL), CONTRACT, "approve", { request_id: interview }, { gasTgas: 100 }),
   );
 
+  // Above the one-approver limit: a DAO Transfer proposal, paid from the DAO's treasury.
+  const report = rid("pay");
   await record(
-    "escalate",
-    "alice requests 300 for writer-2",
+    "report-escalate",
+    "maya asks 120 for sofia (DAO vote)",
     "ok escalated",
-    ALICE,
-    await spend(ALICE, WRITER_2, 300, `https://news.example/${runId}/series`),
+    MAYA,
+    await spend(MAYA, SOFIA, 120, `${WORK}/q4-ecosystem-report`, "Q4 ecosystem report", report),
+  );
+  const req = await view<{ dao_proposal_id: string }>(network, CONTRACT, "get_request", {
+    request_id: report,
+  });
+  await record(
+    "report-vote",
+    `council approves DAO proposal ${req.dao_proposal_id}`,
+    "ok",
+    LENA,
+    await voteUntilApproved(Number(req.dao_proposal_id), [LENA, DANIEL]),
+  );
+  await new Promise((r) => setTimeout(r, 3000));
+  await record(
+    "report-settle",
+    "record the DAO result",
+    "ok paid_by_dao",
+    OWNER,
+    await call(owner, CONTRACT, "settle_escalation", { request_id: report }, { gasTgas: 80 }),
   );
 
-  const [a, b] = await Promise.all([
-    spend(ALICE, WRITER_1, 30, `https://news.example/${runId}/race-a`),
-    spend(BOB, WRITER_2, 30, `https://news.example/${runId}/race-b`),
-  ]);
-  const [first, second] = a.ok ? [a, b] : [b, a];
-  await record(
-    "race-first",
-    "race: first 30 of 55 reserves",
-    "ok pending_approval",
-    first === a ? ALICE : BOB,
-    first,
-  );
-  await record(
-    "race-second",
-    "race: second 30 is refused",
-    "rejected over_available",
-    first === a ? BOB : ALICE,
-    second,
-  );
-  await record(
-    "control",
-    "control: 30 with 25 left",
-    "rejected over_available",
-    BOB,
-    await spend(BOB, WRITER_2, 30, `https://news.example/${runId}/control`),
-  );
-
-  await record(
-    "duplicate-work",
-    "alice pays writer-1 again, same link",
-    "rejected duplicate_work",
-    ALICE,
-    await spend(ALICE, WRITER_1, 5, article),
-  );
+  // Refusals: failed calls change nothing and add nothing to the activity feed.
   await record(
     "unknown-payee",
-    "alice pays an unknown account",
+    "maya pays an account that isn't a contributor",
     "rejected payee_not_allowed",
-    ALICE,
-    await spend(ALICE, UNKNOWN, 5, `https://news.example/${runId}/x`),
+    MAYA,
+    await spend(MAYA, UNKNOWN, 5, `${WORK}/issue-212/guest-post`, "Guest post"),
   );
-  const repeated = rid("retry");
-  await spend(ALICE, WRITER_2, 1, `https://news.example/${runId}/retry`, repeated);
+  await record(
+    "duplicate-work",
+    "maya pays sofia again for the same roundup",
+    "rejected duplicate_work",
+    MAYA,
+    await spend(
+      MAYA,
+      SOFIA,
+      6,
+      `${WORK}/issue-212/ecosystem-roundup`,
+      "Ecosystem roundup, issue 212",
+    ),
+  );
+  const retry = rid("pay");
+  await record(
+    "event-photo",
+    "theo pays kenji 4",
+    "ok paid",
+    THEO,
+    await spend(THEO, KENJI, 4, `${WORK}/issue-212/event-photo`, "Event photo", retry),
+  );
   await record(
     "duplicate-request",
-    "network retry, same request id",
+    "network retry with the same request id",
     "rejected duplicate_request",
-    ALICE,
-    await spend(ALICE, WRITER_2, 1, `https://news.example/${runId}/retry-2`, repeated),
-  );
-
-  await record(
-    "pause",
-    "council-2 pauses bob",
-    "ok",
-    COUNCIL_2,
-    await call(
-      as(COUNCIL_2),
-      CONTRACT,
-      "pause",
-      { envelope_id: fixture.envelope_id, spender: BOB },
-      { gasTgas: 30 },
-    ),
+    THEO,
+    await spend(THEO, KENJI, 4, `${WORK}/issue-212/event-photo-2`, "Event photo", retry),
   );
   await record(
-    "paused",
-    "bob pays writer-1 5",
-    "rejected paused",
-    BOB,
-    await spend(BOB, WRITER_1, 5, `https://news.example/${runId}/after-pause`),
-  );
-}
-
-async function raise() {
-  const eligible = await view<boolean>(network, CONTRACT, "eligible", { account_id: ALICE });
-  if (!eligible) throw new Error("alice isn't eligible yet: run `raise` 1 day after `history`");
-  const c1 = as(COUNCIL_1);
-  const env = fixture.envelope_id;
-  const queued = await call(
-    c1,
-    CONTRACT,
-    "raise_limit",
-    { envelope_id: env, spender: ALICE, new_limit: usdc(20) },
-    { gasTgas: 30 },
-  );
-  await record("raise", "council-1 raises alice to 20", "ok", COUNCIL_1, queued);
-  const changeId = String(queued.value);
-  await record(
-    "apply-early",
-    "apply the raise before the delay",
-    "rejected not_yet",
-    OWNER,
-    await call(as(OWNER), CONTRACT, "apply_change", { change_id: changeId }, { gasTgas: 30 }),
-  );
-  await record(
-    "over-ceiling",
-    "council-1 raises alice to 30",
-    "rejected above_ceiling",
-    COUNCIL_1,
-    await call(
-      c1,
-      CONTRACT,
-      "raise_limit",
-      { envelope_id: env, spender: ALICE, new_limit: usdc(30) },
-      { gasTgas: 30 },
-    ),
-  );
-  console.log("waiting out the 2-minute delay...");
-  await new Promise((r) => setTimeout(r, 125_000));
-  await record(
-    "apply",
-    "apply the raise after the delay",
-    "ok",
-    OWNER,
-    await call(as(OWNER), CONTRACT, "apply_change", { change_id: changeId }, { gasTgas: 30 }),
-  );
-
-  const again = await call(
-    c1,
-    CONTRACT,
-    "raise_limit",
-    { envelope_id: env, spender: ALICE, new_limit: usdc(25) },
-    { gasTgas: 30 },
-  );
-  await record("raise-2", "council-1 queues alice to 25", "ok", COUNCIL_1, again);
-  await record(
-    "cancel",
-    "council-2 cancels it",
-    "ok",
-    COUNCIL_2,
-    await call(
-      as(COUNCIL_2),
-      CONTRACT,
-      "cancel_change",
-      { change_id: String(again.value) },
-      { gasTgas: 30 },
-    ),
-  );
-  await record(
-    "apply-cancelled",
-    "apply the cancelled raise",
-    "rejected not_queued",
-    OWNER,
-    await call(
-      as(OWNER),
-      CONTRACT,
-      "apply_change",
-      { change_id: String(again.value) },
-      { gasTgas: 30 },
-    ),
+    "not-spender",
+    "lena (approver, not a lead) tries to pay",
+    "rejected not_spender",
+    LENA,
+    await spend(LENA, ANA, 5, `${WORK}/issue-212/cover`, "Cover"),
   );
 }
 
 async function close() {
-  const r = await daoDo(`Close Earmark budget ${fixture.envelope_id}`, {
+  const r = await daoDo(`* Title: Close Earmark budget "News contributors"`, {
     FunctionCall: {
       receiver_id: CONTRACT,
       actions: [
@@ -539,10 +572,10 @@ async function close() {
       ],
     },
   });
-  await record("close", "DAO closes the budget", "ok", OWNER, r);
+  await record("close", "DAO closes the budget", "ok", PRIYA, r);
 }
 
-const phases: Record<string, () => Promise<void>> = { setup, history, scenes, raise, close };
+const phases: Record<string, () => Promise<void>> = { setup, history, close };
 const phase = process.argv[2] ?? "";
 if (!phases[phase]) {
   console.error(`usage: demo.ts <${Object.keys(phases).join("|")}>`);

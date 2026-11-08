@@ -1,0 +1,16 @@
+{
+  "network": "testnet",
+  "contract": "try.earmark.testnet",
+  "dao": "community-news.sputnikv2.testnet",
+  "token": "tusdc.earmark.testnet",
+  "envelope_id": "0",
+  "lead": "try-lead.earmark.testnet",
+  "council": "try-council.earmark.testnet",
+  "payees": [
+    "try-writer.earmark.testnet",
+    "try-designer.earmark.testnet"
+  ],
+  "paid_work": "https://try.earmark.example/already-paid",
+  "lead_key": "ed25519:B2Gfh8m6gABefXCK6KCBZFPU3EjApJ4YKtkX2qMGUtjW",
+  "council_key": "ed25519:DhYWvhq5jSztTe4kMhnMPk4KE82psWBU8twTzMJ9HTBw"
+}

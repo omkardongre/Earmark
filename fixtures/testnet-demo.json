@@ -1,205 +1,218 @@
 {
   "network": "testnet",
-  "contract": "v4.earmark.testnet",
-  "dao": "earmark-demo.sputnikv2.testnet",
+  "contract": "budgets.earmark.testnet",
+  "dao": "community-news.sputnikv2.testnet",
   "token": "tusdc.earmark.testnet",
   "envelope_id": "0",
+  "admins": [
+    "priya.earmark.testnet",
+    "daniel.earmark.testnet",
+    "lena.earmark.testnet"
+  ],
   "accounts": {
-    "alice": "alice.earmark.testnet",
-    "bob": "bob.earmark.testnet",
-    "council_1": "council-1.earmark.testnet",
-    "council_2": "council-2.earmark.testnet",
-    "writer_1": "writer-1.earmark.testnet",
-    "writer_2": "writer-2.earmark.testnet",
-    "designer": "designer.earmark.testnet"
+    "priya": "priya.earmark.testnet",
+    "daniel": "daniel.earmark.testnet",
+    "lena": "lena.earmark.testnet",
+    "maya": "maya.earmark.testnet",
+    "theo": "theo.earmark.testnet",
+    "sofia": "sofia-reyes.earmark.testnet",
+    "kenji": "kenji-tanaka.earmark.testnet",
+    "ana": "ana-costa.earmark.testnet"
   },
   "steps": [
+    {
+      "step": "requestor",
+      "label": "DAO adds Earmark to the Requestor role",
+      "expect": "ok",
+      "tx": "A4vLbWPVxdEL6FjuurGyHJNyerW6sJufLkzxj4xtLEYy",
+      "signer": "priya.earmark.testnet",
+      "ok": true,
+      "result": null
+    },
     {
       "step": "create",
       "label": "DAO creates budget \"News contributors\"",
       "expect": "ok",
-      "tx": "FcQHZFpGbVMK5M2bfC4VXBQiXX133aiGbMN4QcLvYytU",
-      "signer": "earmark.testnet",
+      "tx": "ECfuUckRrYemeQUZf6vGszwkrfe5ywGjasRDvRXvJhCT",
+      "signer": "priya.earmark.testnet",
       "ok": true,
       "result": null,
-      "available": "0"
-    },
-    {
-      "step": "history-fund",
-      "label": "DAO funds the budget with 6",
-      "expect": "ok",
-      "tx": "F4iGk38pkgmEdwogZXxhvFgb5pbUgec8QvS8VhHCaViZ",
-      "signer": "earmark.testnet",
-      "ok": true,
-      "result": null,
-      "available": "6"
-    },
-    {
-      "step": "history-1",
-      "label": "alice pays writer-1 2 (earlier work)",
-      "expect": "ok",
-      "tx": "G8KpNxnCLbtADXAcdBwGo4xbqmUDAeyyio2JdkE2YjK2",
-      "signer": "alice.earmark.testnet",
-      "ok": true,
-      "result": "paid",
-      "available": "4"
-    },
-    {
-      "step": "history-2",
-      "label": "alice pays writer-2 2 (earlier work)",
-      "expect": "ok",
-      "tx": "A4iQEVJdU5iKdpKnckoizrm7CuhjyKbCgCsJZCfj4wpw",
-      "signer": "alice.earmark.testnet",
-      "ok": true,
-      "result": "paid",
-      "available": "2"
-    },
-    {
-      "step": "history-3",
-      "label": "alice pays designer 2 (earlier work)",
-      "expect": "ok",
-      "tx": "2RTNkk8BDfgciSoR8UkArcft26XYHUqhX6aq54zLjvUN",
-      "signer": "alice.earmark.testnet",
-      "ok": true,
-      "result": "paid",
       "available": "0"
     },
     {
       "step": "fund",
-      "label": "DAO funds the budget with 100",
+      "label": "DAO funds the budget with 170",
       "expect": "ok",
-      "tx": "uSfjZRK8gHp5FSjhR6hPVhW2BZWRFtYRPp69Chj5Czp",
-      "signer": "earmark.testnet",
+      "tx": "HQdEEKqdz2Cvx9TV7zCzBwqNCZapC4KuWUNSt7MrWaWC",
+      "signer": "priya.earmark.testnet",
       "ok": true,
       "result": null,
-      "available": "100"
+      "available": "170"
     },
     {
-      "step": "auto",
-      "label": "alice pays writer-1 5",
+      "step": "roundup-211",
+      "label": "maya pays sofia-reyes 6",
       "expect": "ok paid",
-      "tx": "7cSYrTNEFuWLUogzRGTaqBBYikZqAS4b1gn5h9PK2d1n",
-      "signer": "alice.earmark.testnet",
+      "tx": "6gPbMdY6ayAWwSLSHHoL9EdmcHPsBLjjvvcipMSMt7mh",
+      "signer": "maya.earmark.testnet",
       "ok": true,
       "result": "paid",
-      "available": "95"
+      "available": "164"
     },
     {
-      "step": "one-approval",
-      "label": "alice requests 40 for designer",
+      "step": "photos-211",
+      "label": "maya pays kenji-tanaka 8",
+      "expect": "ok paid",
+      "tx": "BAJyUSVwdgenvUk8Wc9i344sPkEUympErj1igFr9WVQL",
+      "signer": "maya.earmark.testnet",
+      "ok": true,
+      "result": "paid",
+      "available": "156"
+    },
+    {
+      "step": "header-211",
+      "label": "theo pays ana-costa 7",
+      "expect": "ok paid",
+      "tx": "BZizdmrxZcGkpJpStqc8WELmcHGsigVUnhAXtu8CCYp4",
+      "signer": "theo.earmark.testnet",
+      "ok": true,
+      "result": "paid",
+      "available": "149"
+    },
+    {
+      "step": "roundup-212",
+      "label": "maya pays sofia-reyes 6",
+      "expect": "ok paid",
+      "tx": "BPh6dkJKsuGVwhYAHpVKu4eNfgXwQLv88i6e58x3sfZG",
+      "signer": "maya.earmark.testnet",
+      "ok": true,
+      "result": "paid",
+      "available": "143"
+    },
+    {
+      "step": "charts-212",
+      "label": "maya pays ana-costa 9",
+      "expect": "ok paid",
+      "tx": "5on5BxCpheuwTo1ezVQ5eF5axWHvdWfieKeEjQK2vvar",
+      "signer": "maya.earmark.testnet",
+      "ok": true,
+      "result": "paid",
+      "available": "134"
+    },
+    {
+      "step": "recap-212",
+      "label": "theo pays sofia-reyes 5",
+      "expect": "ok paid",
+      "tx": "wvUCxAMWNtpJDkyD6cS1gVtsBbxeDskwxtXYKnypZsb",
+      "signer": "theo.earmark.testnet",
+      "ok": true,
+      "result": "paid",
+      "available": "129"
+    },
+    {
+      "step": "interview-ask",
+      "label": "maya asks 35 for kenji (needs one approval)",
       "expect": "ok pending_approval",
-      "tx": "G4RLAd4WNoep4P8hyYEX4QyQufSoj4LegDDefLnAAjHX",
-      "signer": "alice.earmark.testnet",
+      "tx": "517A9gFcPcPjFgNSd6Zoms1kWcU7HES6PJhJPWtxLunJ",
+      "signer": "maya.earmark.testnet",
       "ok": true,
       "result": "pending_approval",
-      "available": "55"
+      "available": "94"
     },
     {
-      "step": "approve",
-      "label": "council-1 approves the 40",
+      "step": "interview-approve",
+      "label": "daniel approves the 35",
       "expect": "ok paid",
-      "tx": "PvQdXkFkWJNWzrvwrY69DcyBVgZTXuRSb8p1X5s7z2q",
-      "signer": "council-1.earmark.testnet",
+      "tx": "DQihrwfjk7WXdjTScgSzKceBv3nxb9DY5EsrbLKkRDN9",
+      "signer": "daniel.earmark.testnet",
       "ok": true,
       "result": "paid",
-      "available": "55"
+      "available": "94"
     },
     {
-      "step": "escalate",
-      "label": "alice requests 300 for writer-2",
+      "step": "report-escalate",
+      "label": "maya asks 120 for sofia (DAO vote)",
       "expect": "ok escalated",
-      "tx": "Tt7Y8mQKd4Diif6LtWPfvMrK4Z1JF5PS4LGqrC6em4g",
-      "signer": "alice.earmark.testnet",
+      "tx": "EXVPqtFpu4yHd2uvqwF2nyYmCmzSMEBHFrr362xk8bWX",
+      "signer": "maya.earmark.testnet",
       "ok": true,
       "result": "escalated",
-      "available": "55"
+      "available": "94"
     },
     {
-      "step": "race-first",
-      "label": "race: first 30 of 55 reserves",
-      "expect": "ok pending_approval",
-      "tx": "2LEQRC1bEHV1dgRntLnE5QaLetKDzppUXttuxmw7RZ81",
-      "signer": "alice.earmark.testnet",
+      "step": "report-vote",
+      "label": "council approves DAO proposal 4",
+      "expect": "ok",
+      "tx": "AFpqXeBzpGSa9cdWAWXoARJ4vYkLBGfqXHii231qBhuR",
+      "signer": "lena.earmark.testnet",
       "ok": true,
-      "result": "pending_approval",
-      "available": "25"
+      "result": null,
+      "available": "94"
     },
     {
-      "step": "race-second",
-      "label": "race: second 30 is refused",
-      "expect": "rejected over_available",
-      "tx": "Fxb9r6f4EPQF1iVnfGGUsMxMMLmuhJWQ2TTq3rHs5RaJ",
-      "signer": "bob.earmark.testnet",
-      "ok": false,
-      "result": null,
-      "error": "over_available",
-      "available": "25"
-    },
-    {
-      "step": "control",
-      "label": "control: 30 with 25 left",
-      "expect": "rejected over_available",
-      "tx": "73Q87m7GoUArFbBkTbjRvqwNLdSKY1JLcsjezFxXY6kA",
-      "signer": "bob.earmark.testnet",
-      "ok": false,
-      "result": null,
-      "error": "over_available",
-      "available": "25"
-    },
-    {
-      "step": "duplicate-work",
-      "label": "alice pays writer-1 again, same link",
-      "expect": "rejected duplicate_work",
-      "tx": "Cbki6tXsSpHreZZKJENnwogS4Y4BehtqRWgRHm32tjt6",
-      "signer": "alice.earmark.testnet",
-      "ok": false,
-      "result": null,
-      "error": "duplicate_work",
-      "available": "25"
+      "step": "report-settle",
+      "label": "record the DAO result",
+      "expect": "ok paid_by_dao",
+      "tx": "74J8xWb4gkRQSt9q34kHXjniFfCKsjRggaHYEAqY4ius",
+      "signer": "earmark.testnet",
+      "ok": true,
+      "result": "paid_by_dao",
+      "available": "94"
     },
     {
       "step": "unknown-payee",
-      "label": "alice pays an unknown account",
+      "label": "maya pays an account that isn't a contributor",
       "expect": "rejected payee_not_allowed",
-      "tx": "GEjVEuZMm1bHzd7tRkkqUGadCGqJVJSVTfPr4mbEmxxh",
-      "signer": "alice.earmark.testnet",
+      "tx": "65tQF2qgGh8ayKAzRUReUWHJY5haGiAkWwAwQPfTwMWB",
+      "signer": "maya.earmark.testnet",
       "ok": false,
       "result": null,
       "error": "payee_not_allowed",
-      "available": "25"
+      "available": "94"
+    },
+    {
+      "step": "duplicate-work",
+      "label": "maya pays sofia again for the same roundup",
+      "expect": "rejected duplicate_work",
+      "tx": "NuEu1CZPQhc2bEiko9gdJjBxrDdN4EDG2i5e57U1EKX",
+      "signer": "maya.earmark.testnet",
+      "ok": false,
+      "result": null,
+      "error": "duplicate_work",
+      "available": "94"
+    },
+    {
+      "step": "event-photo",
+      "label": "theo pays kenji 4",
+      "expect": "ok paid",
+      "tx": "jWTfXKBaBdHg4gPDo8K2B3BXy7QT2PZrhgSxd57omix",
+      "signer": "theo.earmark.testnet",
+      "ok": true,
+      "result": "paid",
+      "available": "90"
     },
     {
       "step": "duplicate-request",
-      "label": "network retry, same request id",
+      "label": "network retry with the same request id",
       "expect": "rejected duplicate_request",
-      "tx": "47eorSvucb6N3yZz9o2WGoB5sctZGu8Cv8df27aXq7h4",
-      "signer": "alice.earmark.testnet",
+      "tx": "HKaj7cnr2i4yDhjguK3HLRFY4YrduX34WubZrrV6d1mu",
+      "signer": "theo.earmark.testnet",
       "ok": false,
       "result": null,
       "error": "duplicate_request",
-      "available": "24"
+      "available": "90"
     },
     {
-      "step": "pause",
-      "label": "council-2 pauses bob",
-      "expect": "ok",
-      "tx": "Ah3fXMmSEzk5hNXdyA5XT31neai8xmp4YcvpPigJPQLB",
-      "signer": "council-2.earmark.testnet",
-      "ok": true,
-      "result": null,
-      "available": "24"
-    },
-    {
-      "step": "paused",
-      "label": "bob pays writer-1 5",
-      "expect": "rejected paused",
-      "tx": "H9s2gXGHCsd3PD9AqETMZcoBTjBBkFfF9PXheix6MqHR",
-      "signer": "bob.earmark.testnet",
+      "step": "not-spender",
+      "label": "lena (approver, not a lead) tries to pay",
+      "expect": "rejected not_spender",
+      "tx": "7gfKGFqmLcxcwgCR5ZhEGH9txXZj5jx64nijJUkLi9pC",
+      "signer": "lena.earmark.testnet",
       "ok": false,
       "result": null,
-      "error": "paused",
-      "available": "24"
+      "error": "not_spender",
+      "available": "90"
     }
   ],
-  "code_hash": "AkqfHinhRp89yU3DZuFKiP3ffXF1WvHS6A6ek5pH2Zsv"
+  "code_hash": "FnyFg8uSp6gPnaQPnsuiistpzZ6cQTNRoEmPvGzJSGS8"
 }
