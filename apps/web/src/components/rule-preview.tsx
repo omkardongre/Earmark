@@ -17,7 +17,7 @@ const PATHS: {
   { key: "auto", label: "Paid at once", tone: "green", hint: "within the limit" },
   { key: "one", label: "One approval", tone: "amber", hint: "one approver signs" },
   { key: "dao", label: "DAO vote", tone: "blue", hint: "the council votes" },
-  { key: "duplicate", label: "Blocked", tone: "red", hint: "same work paid twice" },
+  { key: "duplicate", label: "Blocked", tone: "red", hint: "work already paid" },
 ];
 
 const OUTCOMES: { key: Outcome; label: string }[] = [
@@ -365,6 +365,7 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
               <p className="text-muted">
                 Each past payout is sorted by amount under your two limits. “Blocked” means the same
                 person was already paid for the same link (share-tracking parts of links ignored).
+                In the Blocked row, “Council: approved” counts work the DAO paid a second time.
                 Payee lists aren’t applied, because the DAO never had one. With Earmark, a lead the
                 DAO trusts reviews the work before paying.
               </p>

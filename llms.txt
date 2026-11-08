@@ -1,0 +1,43 @@
+# Earmark
+
+> Earmark gives teams in a Sputnik DAO (including Trezu-made treasuries) their own budgets, enforced by a NEAR contract with no keys. Small payouts go out at once, medium ones need one approver, large ones become a DAO proposal; payouts go only to approved payees, funds are reserved at request, and the same work can't be paid twice. Track: Social Money (`social`). Testnet only.
+
+Hosted app (testnet): https://earmark-878141445235.us-central1.run.app. Contract: `budgets.earmark.testnet`. DAO: `community-news.sputnikv2.testnet`. "Try it" sandbox contract: `try.earmark.testnet`. Commands run from the repository root after `make install`. The live code hash is on the Verify page and printed by `make verify`.
+
+## Entry points
+
+- [README](https://github.com/omkardongre/Earmark/blob/main/README.md): what it is, "do X → see Y" steps, invariants, threat model, developer docs
+- [Hosted app](https://earmark-878141445235.us-central1.run.app): landing with live counts per payment path and a route picker on `check_spend`
+- [Try it](https://earmark-878141445235.us-central1.run.app/try): no-wallet testnet transactions: pay, ask and approve, five refusals with the contract's reason
+- [Try your rules](https://earmark-878141445235.us-central1.run.app/preview): NEARWEEK's 14,171 mainnet proposals replayed against two limits
+- [Check it yourself](https://earmark-878141445235.us-central1.run.app/verify): keyless live checks of the contract
+- [People](https://earmark-878141445235.us-central1.run.app/people): contributor and lead records from contract views
+- [Contract source](https://github.com/omkardongre/Earmark/tree/main/contracts/earmark/src): Rust, near-sdk 5.29.1
+- [Unit tests](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `make test`
+- [Sandbox tests](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/tests/sandbox.rs): `make test-sandbox` (Docker)
+- [Demo fixture](https://github.com/omkardongre/Earmark/blob/main/fixtures/testnet-demo.json): every recorded testnet demo transaction with its expected result
+
+## Commands
+
+- [Makefile](https://github.com/omkardongre/Earmark/blob/main/Makefile): `make verify` (live keyless checks, PASS/FAIL per line), `make demo` (replay of 19 recorded testnet steps, no network), `make test` (unit tests), `make lint`, `make web` (app on localhost:3000)
+
+## Claim → evidence
+
+- [No admin key; code changes only by DAO vote](https://earmark-878141445235.us-central1.run.app/verify): 0 access keys and DAO-only `UpgradeRemote`; also `make verify`
+- [The deployed code is the published build](https://earmark-878141445235.us-central1.run.app/verify): code hash matches the recorded reproducible build; `contract_source_metadata` names the commit; also `make verify`
+- [Balances add up](https://earmark-878141445235.us-central1.run.app/verify): balance = available + waiting + paying, paid requests = paid out; also `make verify`
+- [check_spend matches request_spend](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `check_spend_agrees_with_request_spend` (15 states × 8 amounts)
+- [Escalations settle from the DAO result](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `settle_escalation_records_each_dao_outcome`, `escalation_from_before_the_upgrade_settles_once_after_it`
+- [Funds are reserved at request](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `second_request_cannot_spend_a_reservation`; live race scene on /try
+- [Same work can't be paid twice](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `escalation_reserves_nothing_and_blocks_duplicate_work`, `override_allows_one_repeat_of_the_same_work`; `duplicate_work` step in `make demo`
+- [Failed payout releases the reservation](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/tests/sandbox.rs): `payout_to_unregistered_payee_fails_and_releases_reservation`
+- [Approver can't approve their own request](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `approver_cannot_approve_own_request`
+- [Agent key can only ask](https://earmark-878141445235.us-central1.run.app/try): the lead's key calling `approve` is refused by NEAR; sandbox script `scripts/testnet/s5-agent-key.sh`
+- [NEARWEEK numbers](https://earmark-878141445235.us-central1.run.app/preview): 14,171 proposals; with limits 1 / 5 NEAR the council votes on 20 of 13,896 payouts; 121 requests for work already paid, 23 of them paid twice
+
+## Optional
+
+- [Threat model and limits](https://github.com/omkardongre/Earmark/blob/main/README.md#threat-model-and-limits): escrow trade-off, collusion not solved, public payouts, no audit, testnet only
+- [Invariants table](https://github.com/omkardongre/Earmark/blob/main/README.md#invariants): one test per invariant, plus what is not yet tested
+- [Web app source](https://github.com/omkardongre/Earmark/tree/main/apps/web/src): Next.js 16
+- [CI workflow](https://github.com/omkardongre/Earmark/blob/main/.github/workflows/ci.yml): fmt, clippy, unit tests, biome, typecheck

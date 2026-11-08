@@ -50,5 +50,5 @@ export function proposalUrl(dao: string, id: string | number): string {
 // mirror fixtures/testnet-demo.json (`dao`, `code_hash`); update them when a DAO upgrade lands.
 export const EXPECTED_DAO = process.env.NEXT_PUBLIC_DAO ?? "community-news.sputnikv2.testnet";
 export const EXPECTED_CODE_HASH =
-  process.env.NEXT_PUBLIC_CODE_HASH ?? "FnyFg8uSp6gPnaQPnsuiistpzZ6cQTNRoEmPvGzJSGS8";
+  process.env.NEXT_PUBLIC_CODE_HASH ?? "97LrDySdHmDrebJ89Wdt892uZk1uDEwavJFqNpvbxPPp";
 export const SOURCE_REPO = "https://github.com/omkardongre/Earmark";
