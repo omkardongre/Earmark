@@ -40,7 +40,7 @@ No wallet needed for any of these steps.
 |---|---|
 | Open the [hosted app](https://earmark-878141445235.us-central1.run.app) signed out | One line on what Earmark is, three tiles (paid at once / one approval / DAO vote) with live counts, and a route picker: enter an amount and a payee, see "pays now", "one approval", "DAO vote" or "blocked: why", from the contract's `check_spend` view |
 | Open [`/try`](https://earmark-878141445235.us-central1.run.app/try) | Real testnet transactions on a sandbox budget: pay 5 (paid at once); ask for 40 and approve it as a council member (the page asks for 25 until the planned limit change applies); then five refusals, each with the contract's reason and the transaction: an unknown payee with the agent's key, the same work twice, two payments racing for the last funds, paying while paused, and the lead's key trying to approve (NEAR itself refuses the key) |
-| Open [`/preview`](https://earmark-878141445235.us-central1.run.app/preview) ("Try your rules") | NEARWEEK's 14,171 real proposals replayed against two limits you set. The "Blocked" tile shows 121; "How we counted" shows 23 of them approved by the council |
+| Open [`/preview`](https://earmark-878141445235.us-central1.run.app/preview) ("Replay") | NEARWEEK's 14,171 real proposals replayed against two limits you set. The "Blocked" tile shows 121; "How we counted" shows 23 of them approved by the council |
 | Open [`/budgets/0`](https://earmark-878141445235.us-central1.run.app/budgets/0) ("News contributors") | Available, waiting for approval and paid out, and every payment with its transaction. The 120 tUSDC payment to Sofia went to a DAO vote and shows "Paid by DAO"; its payment page links "Proposal #4" (on testnet this opens the DAO on NearBlocks, since Trezu has no testnet) |
 | Open [`/people`](https://earmark-878141445235.us-central1.run.app/people) | Each contributor's paid count and total, each lead's record, limit and raise eligibility, and the council. Every number comes from a contract view |
 | Open [`/verify`](https://earmark-878141445235.us-central1.run.app/verify) ("Check it yourself") | Live, keyless checks: 0 access keys, the code hash matches the recorded build, code changes only by DAO vote, the DAO is the owner, balances add up. Each row links to NearBlocks and the raw RPC answer |
@@ -233,13 +233,13 @@ Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued
 Screens in [`apps/web`](apps/web):
 
 - **Landing** for signed-out visitors: one line, live counts per payment path with the latest of each, links to Try it and the replay, and a route picker (amount + payee → pays now / one approval / DAO vote / blocked, from the live `check_spend` view, no wallet).
-- **Budgets home** with activity ("Show more" pages older history through `/api/activity`).
+- **Budgets home** with recent payments: one row per payment showing its latest step, 5 at a time, rule changes left out ("Show more" pages older history through `/api/activity`). People show by name ("Sofia Reyes" for `sofia-reyes.earmark.testnet`); the full account stays in links and the pay sheet.
 - **Budget page**: payments table with filters and `list_requests` paging; animated budget numbers (still with reduced motion); CSV export (`/api/export/<id>`: UTC date, request id, payee, exact amount, token, status, work link, tx; cells starting with `= + - @` are quoted against formula injection).
 - **Payment page** `/payments/[id]`: steps, each with its transaction.
 - **Payment sheet**: the tier shown before you send; a payee registration check (NEP-145 `storage_balance_of`; one-click `storage_deposit` with the deposit read from `storage_balance_bounds`), also used when an approver adds a payee.
-- **Approvals**, shown only to approvers: approve, reject, "Recently decided" with when, and folded controls for waiting changes, pause with a confirm step, and raise.
+- **Approvals**, shown only to approvers: approve, reject, "Recently decided" with when, and folded controls for waiting changes, pause with a confirm step, raise, and payees. "Add" a payee in one step: if the token doesn't know them yet, the same click pays their registration first (the wallet asks twice); the new payee shows in the list with its countdown and a "Make payable" button. The nav badge reloads its count (`/api/queue`) after each action.
 - **People** `/people` and person pages: contributor and lead records from the contract.
-- **Try it** `/try`, **Try your rules** `/preview` (replays a mainnet Sputnik DAO's payout history against draft limits), **Check it yourself** `/verify` and **Set up a budget** `/setup` (sections below).
+- **Try it** `/try`, **Replay** `/preview` (replays a mainnet Sputnik DAO's payout history against draft limits), **Check it yourself** `/verify` and **Set up a budget** `/setup` (sections below).
 
 How it reads and writes:
 

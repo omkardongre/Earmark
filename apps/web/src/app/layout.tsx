@@ -7,7 +7,7 @@ import { ToastProvider } from "@/components/toast";
 import { StaleNotice } from "@/components/verify-stale-notice";
 import { WalletProvider } from "@/components/wallet";
 import { NETWORK } from "@/lib/config";
-import { listBudgets } from "@/lib/near";
+import { approverQueue } from "@/lib/data";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,20 +17,6 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = { themeColor: "#4f46e5", width: "device-width", initialScale: 1 };
-
-/** approver -> payments waiting in their budgets. Drives the Approvals tab and its badge. */
-async function approverQueue(): Promise<Record<string, number>> {
-  try {
-    const out: Record<string, number> = {};
-    for (const b of await listBudgets()) {
-      if (b.closed) continue;
-      for (const a of b.approvers) out[a] = (out[a] ?? 0) + b.pending_requests.length;
-    }
-    return out;
-  } catch {
-    return {};
-  }
-}
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const queue = await approverQueue();

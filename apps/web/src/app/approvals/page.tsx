@@ -95,11 +95,13 @@ export default async function ApprovalsPage() {
               id: cid,
               kind,
               spender: typeof v?.spender === "string" ? v.spender : null,
+              payee: typeof v?.payee === "string" ? v.payee : null,
               text: describeChange(c.change, m),
               by: c.queued_by,
               effectiveNs: c.effective_at_ns,
             };
           }),
+        payees: b.payees,
         spenders: b.spenders.map(([a, l]) => ({
           id: a,
           paused: l.paused,

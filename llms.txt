@@ -9,7 +9,7 @@ Hosted app (testnet): https://earmark-878141445235.us-central1.run.app. Contract
 - [README](https://github.com/omkardongre/Earmark/blob/main/README.md): what it is, "do X → see Y" steps, invariants, threat model, developer docs
 - [Hosted app](https://earmark-878141445235.us-central1.run.app): landing with live counts per payment path and a route picker on `check_spend`
 - [Try it](https://earmark-878141445235.us-central1.run.app/try): no-wallet testnet transactions: pay, ask and approve, five refusals with the contract's reason
-- [Try your rules](https://earmark-878141445235.us-central1.run.app/preview): NEARWEEK's 14,171 mainnet proposals replayed against two limits
+- [Replay a DAO's history](https://earmark-878141445235.us-central1.run.app/preview): NEARWEEK's 14,171 mainnet proposals replayed against two limits
 - [Check it yourself](https://earmark-878141445235.us-central1.run.app/verify): keyless live checks of the contract
 - [People](https://earmark-878141445235.us-central1.run.app/people): contributor and lead records from contract views
 - [Contract source](https://github.com/omkardongre/Earmark/tree/main/contracts/earmark/src): Rust, near-sdk 5.29.1

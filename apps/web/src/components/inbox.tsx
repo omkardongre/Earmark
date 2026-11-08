@@ -5,9 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { CONTRACT } from "@/lib/config";
 import { ago, duration, STATUS, shortName, toBase } from "@/lib/format";
 import { view } from "@/lib/near";
-import { isAccountId } from "@/lib/token";
+import { isAccountId, nearAmount } from "@/lib/token";
 import type { RequestStatus } from "@/lib/types";
-import { RegisterPayee, useRegistration } from "./pay-sheet";
+import { useRegistration } from "./pay-sheet";
 import { useToast } from "./toast";
 import {
   Button,
@@ -50,7 +50,11 @@ export type InboxBudget = {
     text: string;
     by: string;
     effectiveNs: string;
+    /** The account the change is about (a new payee), when it has one. */
+    payee?: string | null;
   }[];
+  /** Who can be paid from this budget now. */
+  payees: string[];
   spenders: {
     id: string;
     paused: boolean;
@@ -82,6 +86,10 @@ type Local = {
   /** "budget|spender" -> when the queued unpause applies (ms). */
   unpausing: Map<string, number>;
   changesGone: Set<string>;
+  /** "budget|payee" -> when a just-queued new payee becomes payable (ms). */
+  payeesQueued: Map<string, number>;
+  /** "budget|payee" of payees just made payable. */
+  payeesAdded: Set<string>;
 };
 const KEEP_MS = 20_000;
 const fresh = (): Local => ({
@@ -90,6 +98,8 @@ const fresh = (): Local => ({
   paused: new Map(),
   unpausing: new Map(),
   changesGone: new Set(),
+  payeesQueued: new Map(),
+  payeesAdded: new Set(),
 });
 
 function useNow(): number {
@@ -128,6 +138,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
     spenderId?: string;
   } | null>(null);
   const live = now - local.at < KEEP_MS ? local : null;
+  const controlsOpen = useRef(false);
 
   if (!accountId) {
     return (
@@ -154,10 +165,15 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
   const later = duration(delaySecs);
 
   /** Runs one action. Only one at a time: the wallet shows one request at once. */
-  const run = async (key: string, method: string, args: object) => {
+  const run = async (
+    key: string,
+    method: string,
+    args: object,
+    opts: { receiverId?: string; deposit?: string } = {},
+  ) => {
     if (busy) return null;
     setBusy(key);
-    const r = await call(method, args, { gasTgas: method === "approve" ? 100 : 30 });
+    const r = await call(method, args, { gasTgas: method === "approve" ? 100 : 30, ...opts });
     setBusy(null);
     if (!r.ok) toast({ ok: false, text: r.error });
     return r.ok ? r : null;
@@ -171,6 +187,8 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
         paused: new Map(prev.paused),
         unpausing: new Map(prev.unpausing),
         changesGone: new Set(prev.changesGone),
+        payeesQueued: new Map(prev.payeesQueued),
+        payeesAdded: new Set(prev.payeesAdded),
       };
       edit(next);
       return next;
@@ -222,6 +240,9 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
   ].slice(0, 3);
   const changesOf = (b: InboxBudget) => b.changes.filter((c) => !live?.changesGone.has(c.id));
   const waitingChanges = mine.reduce((n, b) => n + changesOf(b).length, 0);
+  // Controls open by themselves when a change waits, and stay open once open: applying the last
+  // change mustn't fold the panel away under the user.
+  if (waitingChanges > 0) controlsOpen.current = true;
 
   const isPaused = (key: string, server: boolean) => live?.paused.get(key) ?? server;
   /** When a queued unpause applies (ms), from the chain or from this screen's own action. */
@@ -232,6 +253,55 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
   };
 
   const label = (key: string, idle: string) => (busy === key ? "Confirm in wallet…" : idle);
+
+  /** New payees show in the payee list; every other waiting change in "Waiting changes". */
+  const payeeChanges = (b: InboxBudget) => changesOf(b).filter((c) => c.kind === "add_payee");
+  const otherChanges = (b: InboxBudget) => changesOf(b).filter((c) => c.kind !== "add_payee");
+
+  /** Apply (once the wait is over; the main action) and Cancel for a waiting change. */
+  const changeActions = (
+    b: InboxBudget,
+    c: InboxBudget["changes"][number],
+    ready: boolean,
+    applyLabel: string,
+  ) => {
+    const cKey = `c${c.id}`;
+    const xKey = `x${c.id}`;
+    return (
+      <div className="flex gap-2">
+        {ready && (
+          <Button
+            onClick={async () => {
+              const r = await run(cKey, "apply_change", { change_id: c.id });
+              if (!r) return;
+              remember((l) => {
+                l.changesGone.add(c.id);
+                if (c.kind === "unpause") l.paused.set(`${b.id}|${c.spender ?? ""}`, false);
+                if (c.kind === "add_payee" && c.payee) l.payeesAdded.add(`${b.id}|${c.payee}`);
+              });
+              toast({ ok: true, text: appliedText(c), tx: r.hash });
+            }}
+          >
+            {label(cKey, applyLabel)}
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          onClick={async () => {
+            const r = await run(xKey, "cancel_change", { change_id: c.id });
+            if (!r) return;
+            remember((l) => {
+              l.changesGone.add(c.id);
+              l.unpausing.delete(`${b.id}|${c.spender ?? ""}`);
+            });
+            toast({ ok: true, text: `Cancelled: ${c.text}`, tx: r.hash });
+          }}
+        >
+          {label(xKey, "Cancel")}
+        </Button>
+      </div>
+    );
+  };
 
   /** Opens the pause confirm, unless another wallet action is running. */
   const askPause = (p: NonNullable<typeof pauseConfirm>) => {
@@ -377,14 +447,14 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
 
       <Disclosure
         title="Controls"
-        open={waitingChanges > 0}
+        open={controlsOpen.current || undefined}
         hint={
           waitingChanges > 0 ? (
             <Pill tone="amber">
               {waitingChanges} change{waitingChanges === 1 ? "" : "s"} waiting
             </Pill>
           ) : (
-            "Pause, limits"
+            "Pause, limits, payees"
           )
         }
       >
@@ -446,12 +516,11 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                   )}
                 </div>
 
-                {changesOf(b).length > 0 && (
+                {otherChanges(b).length > 0 && (
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-muted">Waiting changes</p>
-                    {changesOf(b).map((c) => {
+                    {otherChanges(b).map((c) => {
                       const left = countdown(nsToMs(c.effectiveNs), now);
-                      const cKey = `c${c.id}`;
                       return (
                         <div
                           key={c.id}
@@ -468,42 +537,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                               )}
                             </p>
                           </div>
-                          <div className="flex gap-2">
-                            {!left && (
-                              <Button
-                                variant="secondary"
-                                onClick={async () => {
-                                  const r = await run(cKey, "apply_change", { change_id: c.id });
-                                  if (!r) return;
-                                  remember((l) => {
-                                    l.changesGone.add(c.id);
-                                    if (c.kind === "unpause") {
-                                      l.paused.set(`${b.id}|${c.spender ?? ""}`, false);
-                                    }
-                                  });
-                                  toast({ ok: true, text: appliedText(c), tx: r.hash });
-                                }}
-                              >
-                                {label(cKey, "Apply")}
-                              </Button>
-                            )}
-                            <Button
-                              variant="danger"
-                              onClick={async () => {
-                                const r = await run(`x${c.id}`, "cancel_change", {
-                                  change_id: c.id,
-                                });
-                                if (!r) return;
-                                remember((l) => {
-                                  l.changesGone.add(c.id);
-                                  l.unpausing.delete(`${b.id}|${c.spender ?? ""}`);
-                                });
-                                toast({ ok: true, text: `Cancelled: ${c.text}`, tx: r.hash });
-                              }}
-                            >
-                              {label(`x${c.id}`, "Cancel")}
-                            </Button>
-                          </div>
+                          {changeActions(b, c, !left, "Apply")}
                         </div>
                       );
                     })}
@@ -608,24 +642,81 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                   })}
                 </div>
 
-                <AddPayee
-                  budgetId={b.id}
-                  symbol={b.symbol}
-                  busy={busy === `p${b.id}`}
-                  onApprove={async (payee) => {
-                    const r = await run(`p${b.id}`, "approve_payee", {
-                      envelope_id: b.id,
-                      payee,
-                    });
-                    if (!r) return false;
-                    toast({
-                      ok: true,
-                      text: `${shortName(payee)} can be paid in ${later}. Any approver can cancel.`,
-                      tx: r.hash,
-                    });
-                    return true;
-                  }}
-                />
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-muted">Payees</p>
+                  {(() => {
+                    const waiting = payeeChanges(b);
+                    const waitingIds = new Set(waiting.map((c) => c.payee));
+                    const current = [
+                      ...b.payees,
+                      ...[...(live?.payeesAdded ?? [])]
+                        .filter((k) => k.startsWith(`${b.id}|`))
+                        .map((k) => k.slice(b.id.length + 1)),
+                    ].filter((p, i, a) => a.indexOf(p) === i && !waitingIds.has(p));
+                    const justQueued = [...(live?.payeesQueued ?? [])]
+                      .filter(([k]) => k.startsWith(`${b.id}|`))
+                      .map(([k, at]) => [k.slice(b.id.length + 1), at] as const)
+                      .filter(([p]) => !waitingIds.has(p) && !current.includes(p));
+                    return (
+                      <>
+                        {current.length > 0 && (
+                          <div className="flex flex-wrap gap-x-4 gap-y-2">
+                            {current.map((p) => (
+                              <Person key={p} id={p} />
+                            ))}
+                          </div>
+                        )}
+                        {waiting.map((c) => {
+                          const left = countdown(nsToMs(c.effectiveNs), now);
+                          return (
+                            <div
+                              key={c.id}
+                              className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3"
+                            >
+                              <span className="flex flex-wrap items-center gap-2">
+                                {c.payee && <Person id={c.payee} />}
+                                <span className="tabular text-sm text-muted">
+                                  {left ? `can be paid in ${left}` : "ready"}
+                                </span>
+                              </span>
+                              {changeActions(b, c, !left, "Make payable")}
+                            </div>
+                          );
+                        })}
+                        {justQueued.map(([p, at]) => (
+                          <div
+                            key={p}
+                            className="flex items-center gap-2 rounded-xl bg-amber-50 px-4 py-3"
+                          >
+                            <Person id={p} />
+                            <span className="tabular text-sm text-muted">
+                              {countdown(at, now)
+                                ? `can be paid in ${countdown(at, now)}`
+                                : "ready"}
+                            </span>
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
+                  <AddPayee
+                    budgetId={b.id}
+                    symbol={b.symbol}
+                    delay={later}
+                    busy={busy === `p${b.id}`}
+                    run={(method, args, opts) => run(`p${b.id}`, method, args, opts)}
+                    onAdded={(payee, hash) => {
+                      remember((l) =>
+                        l.payeesQueued.set(`${b.id}|${payee}`, Date.now() + delaySecs * 1000),
+                      );
+                      toast({
+                        ok: true,
+                        text: `${shortName(payee)} can be paid in ${later}. Any approver can cancel.`,
+                        tx: hash,
+                      });
+                    }}
+                  />
+                </div>
               </div>
             );
           })}
@@ -845,28 +936,63 @@ function RaiseButton({
   );
 }
 
+type Run = (
+  method: string,
+  args: object,
+  opts?: { receiverId?: string; deposit?: string },
+) => Promise<{ hash: string } | null>;
+
 /**
- * Approve a new payee (queued: payable after the waiting period). Also checks the payee is
- * registered with the budget's token (NEP-145); if not, offers the one-click registration, since
- * a payment to an unregistered account fails.
+ * Add a payee in one step. A payee the budget's token doesn't know yet (NEP-145) can't receive
+ * it, so the same click first pays their one-time token registration (`storage_deposit`), then
+ * approves them (`approve_payee`, payable after the waiting period). The wallet asks once per
+ * transaction.
  */
 function AddPayee({
   budgetId,
   symbol,
+  delay,
   busy,
-  onApprove,
+  run,
+  onAdded,
 }: {
   budgetId: string;
   symbol: string;
+  delay: string;
   busy: boolean;
-  onApprove: (payee: string) => Promise<boolean>;
+  run: Run;
+  onAdded: (payee: string, hash: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [token, setToken] = useState<string | null>(null);
+  const [step, setStep] = useState<"register" | "approve" | null>(null);
   const payee = value.trim().toLowerCase();
   const valid = isAccountId(payee);
-  const { reg, recheck } = useRegistration(token, valid ? payee : null);
+  const { reg } = useRegistration(token, valid ? payee : null);
+  const needsSetup = reg.state === "missing";
+
+  const add = async () => {
+    if (needsSetup && token) {
+      setStep("register");
+      const r = await run(
+        "storage_deposit",
+        { account_id: payee, registration_only: true },
+        { receiverId: token, deposit: reg.deposit },
+      );
+      if (!r) {
+        setStep(null);
+        return;
+      }
+    }
+    setStep("approve");
+    const r = await run("approve_payee", { envelope_id: budgetId, payee });
+    setStep(null);
+    if (!r) return;
+    onAdded(payee, r.hash);
+    setValue("");
+    setOpen(false);
+  };
 
   useEffect(() => {
     if (!open || token) return;
@@ -882,9 +1008,9 @@ function AddPayee({
       </Button>
     );
   }
+  const checking = valid && (reg.state === "checking" || (token === null && reg.state === "idle"));
   return (
     <div className="space-y-2">
-      <p className="text-sm font-medium text-muted">Add payee</p>
       <div className="flex flex-wrap gap-2">
         <input
           className="h-11.5 min-w-0 flex-1 rounded-xl border border-slate-300 px-3.5 outline-none focus:border-brand focus:ring-4 focus:ring-brand/20"
@@ -894,29 +1020,31 @@ function AddPayee({
           onChange={(e) => setValue(e.target.value)}
           autoCapitalize="none"
           spellCheck={false}
+          // biome-ignore lint/a11y/noAutofocus: the field opens on the user's own click
+          autoFocus
         />
-        <Button
-          disabled={!valid || busy}
-          onClick={async () => {
-            if (await onApprove(payee)) {
-              setValue("");
-              setOpen(false);
-            }
-          }}
-        >
-          {busy ? "Confirm in wallet…" : "Approve payee"}
+        <Button disabled={!valid || busy || checking} onClick={add}>
+          {busy
+            ? step === "register" && needsSetup
+              ? "Confirm 1 of 2 in wallet…"
+              : needsSetup
+                ? "Confirm 2 of 2 in wallet…"
+                : "Confirm in wallet…"
+            : "Add"}
+        </Button>
+        <Button variant="ghost" disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
         </Button>
       </div>
-      {payee && !valid && <p className="text-sm text-rose-700">That isn’t a NEAR account.</p>}
-      {token && reg.state === "missing" && (
-        <RegisterPayee
-          token={token}
-          payee={payee}
-          deposit={reg.deposit}
-          symbol={symbol}
-          onDone={recheck}
-        />
-      )}
+      <p className="text-sm text-muted" aria-live="polite">
+        {payee && !valid ? (
+          <span className="text-rose-700">That isn’t a NEAR account.</span>
+        ) : needsSetup ? (
+          `${shortName(payee)} also needs a one-time ${symbol} setup (${nearAmount(reg.deposit)}). Your wallet asks twice.`
+        ) : (
+          `Payable after ${delay}. Any approver can cancel before then.`
+        )}
+      </p>
     </div>
   );
 }

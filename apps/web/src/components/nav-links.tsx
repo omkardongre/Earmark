@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useWallet } from "./wallet";
+import { useEffect, useState } from "react";
+import { CHANGED, useWallet } from "./wallet";
 
 /**
  * Top links on desktop; a bottom tab bar on phones (rendered outside the blurred header).
  * "Approvals" only shows for an approver, with a badge for the payments waiting.
  */
 export function NavLinks({
-  queue,
+  queue: initial,
   mobile = false,
 }: {
   queue: Record<string, number>;
@@ -17,12 +18,27 @@ export function NavLinks({
 }) {
   const path = usePathname();
   const { accountId } = useWallet();
+  // The layout's count can stay stale after an approval (router.refresh doesn't always re-render
+  // it), so the badge reloads its own count after each action.
+  const [queue, setQueue] = useState(initial);
+  useEffect(() => {
+    const reload = async () => {
+      try {
+        const res = await fetch("/api/queue", { cache: "no-store" });
+        if (res.ok) setQueue((await res.json()) as Record<string, number>);
+      } catch {
+        // Keep the last count; the next action or a reload catches up.
+      }
+    };
+    window.addEventListener(CHANGED, reload);
+    return () => window.removeEventListener(CHANGED, reload);
+  }, []);
   const waiting = accountId ? queue[accountId] : undefined;
   const links = [
     { href: "/", label: "Budgets" },
     ...(waiting !== undefined ? [{ href: "/approvals", label: "Approvals", badge: waiting }] : []),
     { href: "/people", label: "People" },
-    { href: "/preview", label: "Try your rules" },
+    { href: "/preview", label: "Replay" },
     ...(accountId ? [] : [{ href: "/try", label: "Try it" }]),
   ];
   return (
