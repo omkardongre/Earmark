@@ -1,7 +1,15 @@
 // Read-only chain access: contract views over JSON-RPC, and the transaction behind each Earmark
 // event (FastNEAR tx API). Runs on the server and in the browser; no keys.
 import { CONTRACT, RPC_URL, TX_API } from "./config";
-import type { Budget, Config, QueuedChange, SpenderRecord, SpendRequest, TokenMeta } from "./types";
+import type {
+  Budget,
+  Config,
+  PayeeRecord,
+  QueuedChange,
+  SpenderRecord,
+  SpendRequest,
+  TokenMeta,
+} from "./types";
 
 const toBase64 = (s: string) =>
   typeof window === "undefined"
@@ -45,6 +53,8 @@ export const getBudget = (id: string) =>
 export const listBudgets = () => view<Budget[]>(CONTRACT, "list_envelopes", {});
 export const getRecord = (account: string) =>
   view<SpenderRecord>(CONTRACT, "get_record", { account_id: account });
+export const getPayeeRecord = (account: string) =>
+  view<PayeeRecord>(CONTRACT, "get_payee_record", { account_id: account });
 export const isEligible = (account: string) =>
   view<boolean>(CONTRACT, "eligible", { account_id: account });
 export const listQueued = (budget?: string) =>

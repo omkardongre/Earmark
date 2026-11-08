@@ -1,22 +1,31 @@
 import Link from "next/link";
 import { ActivityList } from "@/components/activity-list";
 import { BudgetCard } from "@/components/budget-card";
+import { Landing } from "@/components/landing";
+import { SignedOut } from "@/components/signed-out";
 import { Disclosure, Empty, ExternalLink, Section } from "@/components/ui";
 import { accountUrl } from "@/lib/config";
 import { loadActivity, loadBase } from "@/lib/data";
+import { listRequests } from "@/lib/near";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const base = await loadBase();
   const { config, budgets, meta } = base;
-  const activity = await loadActivity(base);
   const open = budgets.filter((b) => !b.closed);
   const closed = budgets.filter((b) => b.closed);
+  const [activity, requests] = await Promise.all([
+    loadActivity(base),
+    Promise.all(open.map((b) => listRequests(b.id, { limit: 100 }))).then((l) => l.flat()),
+  ]);
 
   return (
     <div className="space-y-10">
-      <h1 className="text-3xl font-bold tracking-tight">Budgets</h1>
+      <SignedOut>
+        <Landing requests={requests} meta={meta.values().next().value} />
+      </SignedOut>
+      <h2 className="text-2xl font-bold tracking-tight">Budgets</h2>
 
       {open.length === 0 ? (
         <Empty>No budgets yet. The DAO creates one with a proposal.</Empty>

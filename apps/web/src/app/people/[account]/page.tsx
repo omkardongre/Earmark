@@ -5,7 +5,7 @@ import { Avatar, Card, Disclosure, ExternalLink, Pill, Section } from "@/compone
 import { accountUrl } from "@/lib/config";
 import { loadActivity, loadBase } from "@/lib/data";
 import { ago, duration, money } from "@/lib/format";
-import { getRecord, isEligible } from "@/lib/near";
+import { getPayeeRecord, getRecord, isEligible } from "@/lib/near";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +13,10 @@ export default async function PersonPage({ params }: { params: Promise<{ account
   const account = decodeURIComponent((await params).account);
   if (!/^[a-z0-9._-]{2,64}$/.test(account)) notFound();
   const base = await loadBase();
-  const [record, eligible, activity] = await Promise.all([
+  const [record, eligible, paid, activity] = await Promise.all([
     getRecord(account),
     isEligible(account),
+    getPayeeRecord(account),
     loadActivity(base, { account }),
   ]);
   const { config, budgets, meta } = base;
@@ -68,6 +69,19 @@ export default async function PersonPage({ params }: { params: Promise<{ account
         </Card>
       )}
 
+      {paid.paid_count > 0 && (
+        <Card className="space-y-5 p-6">
+          <h2 className="font-semibold">Paid for work</h2>
+          <div className="grid grid-cols-3 gap-4">
+            <Num label="Payments" value={String(paid.paid_count)} />
+            <Num
+              label="Total received"
+              value={firstMeta ? money(paid.paid_total, firstMeta) : paid.paid_total}
+            />
+            <Num label="Last paid" value={paid.last_paid_at_ns ? ago(paid.last_paid_at_ns) : "–"} />
+          </div>
+        </Card>
+      )}
       <Section title="Budgets">
         {roles.length === 0 ? (
           <p className="text-muted">Not part of any budget.</p>

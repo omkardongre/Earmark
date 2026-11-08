@@ -2,7 +2,7 @@
 export type Network = "testnet" | "mainnet";
 
 export const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "testnet") as Network;
-export const CONTRACT = process.env.NEXT_PUBLIC_CONTRACT ?? "v4.earmark.testnet";
+export const CONTRACT = process.env.NEXT_PUBLIC_CONTRACT ?? "budgets.earmark.testnet";
 
 export const RPC_URL =
   process.env.NEXT_PUBLIC_RPC_URL ??

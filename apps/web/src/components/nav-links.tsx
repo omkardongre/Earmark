@@ -21,7 +21,9 @@ export function NavLinks({
   const links = [
     { href: "/", label: "Budgets" },
     ...(waiting !== undefined ? [{ href: "/approvals", label: "Approvals", badge: waiting }] : []),
+    { href: "/people", label: "People" },
     { href: "/preview", label: "Try your rules" },
+    ...(accountId ? [] : [{ href: "/try", label: "Try it" }]),
   ];
   return (
     <nav
