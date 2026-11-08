@@ -28,9 +28,12 @@ body {
   line-height: 1.5;
 }
 
-:focus-visible {
-  outline: 3px solid rgb(79 70 229 / 30%);
-  outline-offset: 2px;
+/* In the base layer, so a field that draws its own ring (`outline-none` + `focus:ring`) shows one. */
+@layer base {
+  :focus-visible {
+    outline: 3px solid rgb(79 70 229 / 30%);
+    outline-offset: 2px;
+  }
 }
 
 dialog::backdrop {

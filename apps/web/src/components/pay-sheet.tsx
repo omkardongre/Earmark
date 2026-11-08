@@ -6,7 +6,6 @@ import { BLOCKED, shortName, toBase } from "@/lib/format";
 import { view } from "@/lib/near";
 import { isAccountId, nearAmount, storageBalanceOf, storageBounds } from "@/lib/token";
 import type { BlockReason, RequestStatus, Tier, TokenMeta } from "@/lib/types";
-import { useToast } from "./toast";
 import { Avatar, Button, ButtonLink, ExternalLink, Pill } from "./ui";
 import { useWallet } from "./wallet";
 
@@ -73,7 +72,6 @@ export function PaySheet({
   meta: TokenMeta;
 }) {
   const { accountId, connect, call } = useWallet();
-  const toast = useToast();
   const dialog = useRef<HTMLDialogElement>(null);
   // Nobody is picked up front, so nobody gets paid by mistake.
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -85,8 +83,6 @@ export function PaySheet({
   const requestId = useRef("");
   // Set while the sheet is hidden for the wallet popup, so that close isn't treated as "Done".
   const forWallet = useRef(false);
-  // Set when "View" closes the sheet: the user is already going to the payment.
-  const quiet = useRef(false);
 
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => ({ ...d, [k]: v }));
   const { amount, payee, work, memo } = draft;
@@ -129,14 +125,12 @@ export function PaySheet({
     dialog.current?.showModal();
   };
 
-  const finish = (d: Done | null) => {
+  // The success card already said what happened, and the new row is on the page: no toast.
+  const finish = () => {
     requestId.current = "";
     setDraft(EMPTY);
     setDone(null);
     setError(null);
-    // After "Done" the toast keeps a way back to the payment.
-    if (d && d.status !== "failed")
-      toast({ ok: true, text: doneText(d), href: `/payments/${d.id}` });
   };
 
   const submit = async () => {
@@ -203,8 +197,7 @@ export function PaySheet({
         className="m-auto w-full max-w-md rounded-3xl p-0 shadow-xl max-sm:mb-0 max-sm:max-w-none max-sm:rounded-b-none"
         onClose={() => {
           if (forWallet.current) return;
-          if (done) finish(quiet.current ? null : done);
-          quiet.current = false;
+          if (done) finish();
         }}
       >
         {done ? (
@@ -226,11 +219,7 @@ export function PaySheet({
                 href={`/payments/${done.id}?tx=${done.tx}`}
                 variant="secondary"
                 className="flex-1"
-                onClick={() => {
-                  // Going to the payment page already: no toast needed.
-                  quiet.current = true;
-                  dialog.current?.close();
-                }}
+                onClick={() => dialog.current?.close()}
               >
                 View
               </ButtonLink>
@@ -386,7 +375,12 @@ function PayeePicker({
   const [q, setQ] = useState("");
   const name = useId();
   const term = q.trim().toLowerCase();
-  const list = term ? payees.filter((p) => p.toLowerCase().includes(term)) : payees;
+  const matches = term ? payees.filter((p) => p.toLowerCase().includes(term)) : payees;
+  // No scroll inside the sheet: a short list shows whole, a long one shows its first matches
+  // (plus the one picked) and the search box finds the rest.
+  const top = matches.slice(0, SEARCH_FROM);
+  const list = value && matches.includes(value) && !top.includes(value) ? [...top, value] : top;
+  const hidden = matches.length - top.length;
   return (
     <fieldset className="space-y-1.5">
       <legend className="font-medium">Pay to</legend>
@@ -402,9 +396,7 @@ function PayeePicker({
           spellCheck={false}
         />
       )}
-      <div
-        className={`divide-y divide-line rounded-xl border border-slate-300 ${list.length > 3 ? "max-h-52 overflow-y-auto" : ""}`}
-      >
+      <div className="divide-y divide-line rounded-xl border border-slate-300">
         {list.length === 0 ? (
           <p className="px-3.5 py-3 text-sm text-muted">No payee matches “{q}”.</p>
         ) : (
@@ -432,7 +424,11 @@ function PayeePicker({
           ))
         )}
       </div>
-      <span className="block text-sm text-muted">Not listed? An approver can add them.</span>
+      <span className="block text-sm text-muted">
+        {hidden > 0
+          ? `${hidden} more: search to find them.`
+          : "Not listed? An approver can add them."}
+      </span>
     </fieldset>
   );
 }
