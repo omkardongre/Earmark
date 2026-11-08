@@ -12,5 +12,7 @@
   ],
   "paid_work": "https://try.earmark.example/already-paid",
   "lead_key": "ed25519:B2Gfh8m6gABefXCK6KCBZFPU3EjApJ4YKtkX2qMGUtjW",
-  "council_key": "ed25519:DhYWvhq5jSztTe4kMhnMPk4KE82psWBU8twTzMJ9HTBw"
+  "council_key": "ed25519:DhYWvhq5jSztTe4kMhnMPk4KE82psWBU8twTzMJ9HTBw",
+  "race_envelope_id": "1",
+  "paused_envelope_id": "2"
 }

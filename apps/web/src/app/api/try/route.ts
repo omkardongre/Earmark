@@ -8,13 +8,6 @@ export async function POST(req: Request) {
   if (!tryEnabled()) {
     return NextResponse.json({ error: "Try it isn't set up on this server." }, { status: 503 });
   }
-  const visitor = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  if (!allow(visitor)) {
-    return NextResponse.json(
-      { error: "Too many tries for now. Wait a few minutes and try again." },
-      { status: 429 },
-    );
-  }
   let body: { scene?: unknown; requestId?: unknown };
   try {
     body = await req.json();
@@ -23,6 +16,14 @@ export async function POST(req: Request) {
   }
   const scene = body.scene as Scene;
   if (!SCENES.includes(scene)) return NextResponse.json({ error: "bad scene" }, { status: 400 });
+  // Cloud Run's front end appends the caller's address last; anything before it is client-sent.
+  const visitor = req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() || "local";
+  if (!allow(visitor, scene === "race" ? 2 : 1)) {
+    return NextResponse.json(
+      { error: "Too many tries for now. Wait a few minutes and try again." },
+      { status: 429, headers: { "Retry-After": "600" } },
+    );
+  }
   const requestId = body.requestId;
   if (
     scene === "approve" &&

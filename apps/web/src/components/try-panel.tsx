@@ -2,7 +2,7 @@
 
 import { type ReactNode, useState } from "react";
 import { txUrl } from "@/lib/config";
-import { BLOCKED } from "@/lib/format";
+import { BLOCKED, units } from "@/lib/format";
 import type { BlockReason } from "@/lib/types";
 import { Button, Card, ExternalLink } from "./ui";
 
@@ -12,12 +12,18 @@ type Result = {
   reason?: string;
   tx?: string;
   requestId?: string;
+  amount?: string;
+  race?: Omit<Result, "ms">[];
+  available?: string;
   error?: string;
   ms: number;
 };
 
+const tusdc = (amount: string) => `${units(amount, { symbol: "tUSDC", decimals: 6 })} tUSDC`;
+
 const REFUSED: Record<string, string> = {
   key_not_allowed: "NEAR refused the transaction: this key can only ask for payments.",
+  race_busy: "Someone just ran this. Try again in a minute.",
 };
 const reasonText = (r: string) => REFUSED[r] ?? BLOCKED[r as BlockReason] ?? r.replaceAll("_", " ");
 
@@ -60,9 +66,27 @@ function Answer({ r, okText }: { r: Result; okText: string }) {
       <span className="font-medium">
         {r.ok ? `✓ ${okText}` : `✕ Refused: ${reasonText(r.reason ?? "failed")}`}
       </span>
-      {r.ok && <span className="text-muted">{(r.ms / 1000).toFixed(1)} s</span>}
+      {r.ok && r.ms > 0 && <span className="text-muted">{(r.ms / 1000).toFixed(1)} s</span>}
       {r.tx && <ExternalLink href={txUrl(r.tx)}>View transaction</ExternalLink>}
     </p>
+  );
+}
+
+/** Both racing requests: the first reserves the funds, the second is refused. */
+function RaceAnswer({ r }: { r: Result }) {
+  if (!r.race) return <Answer r={r} okText="Went through" />;
+  const [first, second] = r.race;
+  const amount = r.amount ? tusdc(r.amount) : "";
+  return (
+    <div className="space-y-1">
+      {r.available && (
+        <p className="text-muted">
+          Two requests for {amount} each, {tusdc(r.available)} left.
+        </p>
+      )}
+      {first && <Answer r={{ ...first, ms: 0 }} okText={`First: reserved ${amount}`} />}
+      {second && <Answer r={{ ...second, ms: 0 }} okText="Second: also went through" />}
+    </div>
   );
 }
 
@@ -80,33 +104,45 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
   );
 }
 
-export function TryPanel() {
+/** `pay` and `ask` are the amounts the server sends, in token base units. */
+export function TryPanel({ pay: payAmount, ask: askAmount }: { pay: string; ask: string }) {
   const pay = useAction("pay");
   const ask = useAction("ask");
   const approve = useAction("approve");
   const refusals = [
-    { scene: "unknown", label: "Pay someone who isn't on the list" },
+    {
+      scene: "unknown",
+      label: "Pay someone who isn't on the list",
+      hint: "An AI agent would get this same key. It can only ask.",
+    },
     { scene: "duplicate", label: "Pay for the same work twice" },
+    { scene: "race", label: "Send two payments at once for the last funds" },
+    { scene: "paused", label: "Pay while your spending is paused" },
     { scene: "lead-approves", label: "Approve your own request with the lead's key" },
   ] as const;
-  const unknown = useAction("unknown");
-  const duplicate = useAction("duplicate");
-  const leadApproves = useAction("lead-approves");
-  const refusalActions = { unknown, duplicate, "lead-approves": leadApproves };
+  const refusalActions = {
+    unknown: useAction("unknown"),
+    duplicate: useAction("duplicate"),
+    race: useAction("race"),
+    paused: useAction("paused"),
+    "lead-approves": useAction("lead-approves"),
+  };
   const pending = ask.result?.ok && ask.result.status === "pending_approval" ? ask.result : null;
 
   return (
     <div className="space-y-4">
       <Step n={1} title="Pay a contributor">
-        <p className="text-muted">3 tUSDC is inside your limit, so it pays at once.</p>
+        <p className="text-muted">{tusdc(payAmount)} is inside your limit, so it pays at once.</p>
         <Button disabled={pay.busy} onClick={() => pay.go()}>
-          {pay.busy ? "Paying…" : "Pay 3 tUSDC"}
+          {pay.busy ? "Paying…" : `Pay ${tusdc(payAmount)}`}
         </Button>
         {pay.result && <Answer r={pay.result} okText="Paid" />}
       </Step>
 
       <Step n={2} title="Ask for more">
-        <p className="text-muted">20 tUSDC is above your limit, so one council member decides.</p>
+        <p className="text-muted">
+          {tusdc(askAmount)} is above your limit, so one council member decides.
+        </p>
         <div className="flex flex-wrap gap-3">
           <Button
             disabled={ask.busy}
@@ -115,7 +151,7 @@ export function TryPanel() {
               ask.go();
             }}
           >
-            {ask.busy ? "Asking…" : "Ask for 20 tUSDC"}
+            {ask.busy ? "Asking…" : `Ask for ${tusdc(askAmount)}`}
           </Button>
           {pending && !approve.result?.ok && (
             <Button
@@ -134,17 +170,25 @@ export function TryPanel() {
       <Step n={3} title="Try to break the rules">
         <p className="text-muted">The contract checks every payment. The app can’t skip it.</p>
         <div className="divide-y divide-line rounded-xl ring-1 ring-line">
-          {refusals.map(({ scene, label }) => {
-            const a = refusalActions[scene];
+          {refusals.map((item) => {
+            const a = refusalActions[item.scene];
             return (
-              <div key={scene} className="space-y-2 px-4 py-3">
+              <div key={item.scene} className="space-y-2 px-4 py-3">
                 <div className="flex items-center justify-between gap-3">
-                  <span>{label}</span>
+                  <div>
+                    <p>{item.label}</p>
+                    {"hint" in item && <p className="text-sm text-muted">{item.hint}</p>}
+                  </div>
                   <Button variant="secondary" disabled={a.busy} onClick={() => a.go()}>
                     {a.busy ? "Trying…" : "Try"}
                   </Button>
                 </div>
-                {a.result && <Answer r={a.result} okText="Went through" />}
+                {a.result &&
+                  (item.scene === "race" ? (
+                    <RaceAnswer r={a.result} />
+                  ) : (
+                    <Answer r={a.result} okText="Went through" />
+                  ))}
               </div>
             );
           })}

@@ -1,4 +1,4 @@
-.PHONY: install build test test-sandbox lint fmt verify demo web web-build deploy try-refill
+.PHONY: install build test test-sandbox lint fmt verify demo web web-build deploy try-refill try-scenes try-limits
 
 # The sandbox node needs glibc >= 2.38; this image has it on any host with Docker.
 SANDBOX_IMAGE ?= rust:1.97.1-trixie
@@ -63,3 +63,11 @@ deploy:
 # Tops up the "Try it" sandbox (budget, storage NEAR, signer gas).
 try-refill:
 	$(TSX) scripts/testnet/try.ts refill
+
+# The race and paused sandbox budgets (once; safe to run again).
+try-scenes:
+	$(TSX) scripts/testnet/try.ts scenes
+
+# Budget 0 to 5 paid at once / 50 with one approval: queues the change, then applies it a day later.
+try-limits:
+	$(TSX) scripts/testnet/try.ts limits

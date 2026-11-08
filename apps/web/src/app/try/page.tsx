@@ -2,7 +2,7 @@ import { TryPanel } from "@/components/try-panel";
 import { Card, Disclosure, Empty, ExternalLink } from "@/components/ui";
 import { accountUrl } from "@/lib/config";
 import { units } from "@/lib/format";
-import { getTryBudget, TRY, tryEnabled } from "@/lib/try";
+import { amounts, getTryBudget, TRY, tryEnabled } from "@/lib/try";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,7 @@ export default async function TryPage() {
             <Stat label="paid at once" value={limit ? `≤ ${units(limit, META)}` : "–"} />
             <Stat label="one approval" value={`≤ ${units(budget.one_approver_limit, META)}`} />
           </Card>
-          <TryPanel />
+          <TryPanel {...amounts(budget)} />
         </>
       )}
 
@@ -45,7 +45,8 @@ export default async function TryPage() {
           </p>
           <p>
             The sandbox runs the same contract code as the main demo, and its account has no keys.
-            Only the DAO can change it.
+            Only the DAO can change it. The race and the pause use two more small budgets, so this
+            one stays open for everyone.
           </p>
         </div>
       </Disclosure>
