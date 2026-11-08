@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { AccountButton } from "@/components/account-button";
 import { NavLinks } from "@/components/nav-links";
 import { ToastProvider } from "@/components/toast";
+import { StaleNotice } from "@/components/verify-stale-notice";
 import { WalletProvider } from "@/components/wallet";
 import { NETWORK } from "@/lib/config";
 import { listBudgets } from "@/lib/near";
@@ -60,7 +61,21 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 </div>
               </div>
             </header>
-            <main className="mx-auto max-w-5xl px-4 pb-28 pt-8 sm:pb-16">{children}</main>
+            <main className="mx-auto max-w-5xl px-4 pb-28 pt-8 sm:pb-16">
+              <div className="mb-6 empty:hidden">
+                <StaleNotice />
+              </div>
+              {children}
+            </main>
+            <footer className="mx-auto hidden max-w-5xl px-4 pb-10 text-sm text-subtle sm:block">
+              <Link href="/verify" className="hover:text-ink">
+                Check it yourself
+              </Link>
+              <span className="px-2">·</span>
+              <a href="https://github.com/omkardongre/Earmark" className="hover:text-ink">
+                Source
+              </a>
+            </footer>
             <NavLinks queue={queue} mobile />
           </ToastProvider>
         </WalletProvider>

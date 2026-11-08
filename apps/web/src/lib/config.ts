@@ -8,6 +8,29 @@ export const RPC_URL =
   process.env.NEXT_PUBLIC_RPC_URL ??
   (NETWORK === "mainnet" ? "https://rpc.mainnet.fastnear.com" : "https://rpc.testnet.fastnear.com");
 
+/**
+ * RPC nodes tried in order when a read fails (comma-separated in NEXT_PUBLIC_RPC_FALLBACK_URLS).
+ * `RPC_URL` always goes first; duplicates are dropped.
+ */
+export const RPC_URLS = [
+  ...new Set(
+    [
+      RPC_URL,
+      ...(
+        process.env.NEXT_PUBLIC_RPC_FALLBACK_URLS ??
+        (NETWORK === "mainnet"
+          ? "https://rpc.mainnet.fastnear.com,https://rpc.mainnet.near.org"
+          : "https://rpc.testnet.fastnear.com,https://rpc.testnet.near.org")
+      ).split(","),
+    ]
+      .map((u) => u.trim())
+      .filter(Boolean),
+  ),
+];
+
+/** One RPC or tx API attempt gives up after this long and the next one is tried. */
+export const READ_TIMEOUT_MS = 8_000;
+
 /** FastNEAR transactions API: used only to find the transaction behind each event. */
 export const TX_API =
   NETWORK === "mainnet" ? "https://tx.main.fastnear.com" : "https://tx.test.fastnear.com";
@@ -22,3 +45,10 @@ export const accountUrl = (id: string) => `${EXPLORER}/address/${id}`;
 export function proposalUrl(dao: string, id: string | number): string {
   return NETWORK === "mainnet" ? `https://trezu.app/${dao}/requests?id=${id}` : accountUrl(dao);
 }
+
+// What the Verify page expects to find on chain. The web image doesn't ship fixtures/, so these
+// mirror fixtures/testnet-demo.json (`dao`, `code_hash`); update them when a DAO upgrade lands.
+export const EXPECTED_DAO = process.env.NEXT_PUBLIC_DAO ?? "community-news.sputnikv2.testnet";
+export const EXPECTED_CODE_HASH =
+  process.env.NEXT_PUBLIC_CODE_HASH ?? "FnyFg8uSp6gPnaQPnsuiistpzZ6cQTNRoEmPvGzJSGS8";
+export const SOURCE_REPO = "https://github.com/omkardongre/Earmark";

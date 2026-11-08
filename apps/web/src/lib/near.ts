@@ -1,6 +1,11 @@
 // Read-only chain access: contract views over JSON-RPC, and the transaction behind each Earmark
 // event (FastNEAR tx API). Runs on the server and in the browser; no keys.
-import { CONTRACT, RPC_URL, TX_API } from "./config";
+//
+// Reads try each node in RPC_URLS in turn. If all fail, the server answers with the last good
+// value for the same request (kept in memory, per instance) and marks the data stale, so a page
+// shows slightly old numbers with a notice instead of an error. The browser never gets cached
+// values: its reads follow a user action (a payment check, a refresh) and must be live.
+import { CONTRACT, READ_TIMEOUT_MS, RPC_URLS, TX_API } from "./config";
 import type {
   Budget,
   Config,
@@ -19,33 +24,161 @@ const fromBytes = (b: number[]) => new TextDecoder().decode(new Uint8Array(b));
 
 export class ViewError extends Error {}
 
-export async function view<T>(contract: string, method: string, args: object = {}): Promise<T> {
-  const res = await fetch(RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: "earmark",
-      method: "query",
-      params: {
-        request_type: "call_function",
-        finality: "optimistic",
-        account_id: contract,
-        method_name: method,
-        args_base64: toBase64(JSON.stringify(args)),
-      },
-    }),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new ViewError(`RPC ${res.status}`);
-  const body = (await res.json()) as {
-    result?: { result?: number[]; error?: string };
-    error?: { cause?: { name?: string }; message?: string };
-  };
-  if (body.error) throw new ViewError(body.error.cause?.name ?? body.error.message ?? "rpc_error");
-  if (!body.result?.result) throw new ViewError(body.result?.error ?? "view_failed");
-  return JSON.parse(fromBytes(body.result.result)) as T;
+/** A node or network problem: worth trying the next node, then the last good value. */
+class Unavailable extends Error {}
+
+/** How fresh a value is: `at` is when it was read live (ms); `stale` if it came from memory. */
+export type ReadMeta = { stale: boolean; at: number };
+export type Read<T> = ReadMeta & { value: T };
+
+type Source = "rpc" | "tx";
+type Store = {
+  values: Map<string, { value: unknown; at: number }>;
+  /** Per source: the oldest last-good time served since the last live read, or null. */
+  staleSince: Record<Source, number | null>;
+};
+const SERVER = typeof window === "undefined";
+const MAX_ENTRIES = 2000;
+// On globalThis so every route bundle in the process shares one store.
+const g = globalThis as { __earmarkReads?: Store };
+g.__earmarkReads ??= { values: new Map(), staleSince: { rpc: null, tx: null } };
+const store: Store = g.__earmarkReads;
+
+/** Runs a live read; on a node problem serves the last good value (server only). */
+async function withLastGood<T>(
+  source: Source,
+  key: string,
+  live: () => Promise<T>,
+): Promise<Read<T>> {
+  try {
+    const value = await live();
+    const at = Date.now();
+    if (SERVER) {
+      store.values.delete(key);
+      store.values.set(key, { value, at });
+      if (store.values.size > MAX_ENTRIES) {
+        const oldest = store.values.keys().next().value;
+        if (oldest !== undefined) store.values.delete(oldest);
+      }
+      store.staleSince[source] = null;
+    }
+    return { value, at, stale: false };
+  } catch (e) {
+    const last = SERVER && e instanceof Unavailable ? store.values.get(key) : undefined;
+    if (!last) throw e instanceof Unavailable ? new ViewError(e.message) : e;
+    const since = store.staleSince[source];
+    store.staleSince[source] = since === null ? last.at : Math.min(since, last.at);
+    return { value: last.value as T, at: last.at, stale: true };
+  }
 }
+
+/**
+ * When the oldest value a recent server read fell back to was read live (ms), or null when reads
+ * are live. Pages use it to show "Live data is loading, showing values from <time>".
+ */
+export function staleSince(): number | null {
+  const { rpc, tx } = store.staleSince;
+  if (rpc === null) return tx;
+  return tx === null ? rpc : Math.min(rpc, tx);
+}
+
+// Errors that are the chain's real answer (a contract panic, an unknown account): no failover.
+// Anything else (timeouts, 5xx, 429, a node that isn't synced) moves on to the next node.
+const NODE_TROUBLE = new Set([
+  "UNKNOWN_BLOCK",
+  "NO_SYNCED_BLOCKS",
+  "UNAVAILABLE_SHARD",
+  "NOT_SYNCED_YET",
+]);
+
+async function post(url: string, body: object): Promise<Response> {
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new Unavailable(e instanceof Error ? e.message : "network_error");
+  }
+}
+
+async function rpcOnce<T>(url: string, params: object): Promise<T> {
+  const res = await post(url, { jsonrpc: "2.0", id: "earmark", method: "query", params });
+  if (!res.ok) throw new Unavailable(`RPC ${res.status}`);
+  let body: {
+    result?: T;
+    error?: { name?: string; cause?: { name?: string }; message?: string };
+  };
+  try {
+    body = await res.json();
+  } catch {
+    throw new Unavailable("RPC bad_json");
+  }
+  if (body.error) {
+    const cause = body.error.cause?.name ?? body.error.message ?? "rpc_error";
+    const real =
+      body.error.name === "HANDLER_ERROR" || body.error.name === "REQUEST_VALIDATION_ERROR";
+    throw real && !NODE_TROUBLE.has(cause) ? new ViewError(cause) : new Unavailable(cause);
+  }
+  if (body.result === undefined) throw new Unavailable("RPC empty");
+  return body.result;
+}
+
+/** One `query` call, trying each node in RPC_URLS, then the last good answer. */
+export function rpcQuery<T>(params: object): Promise<Read<T>> {
+  return withLastGood("rpc", `rpc ${JSON.stringify(params)}`, async () => {
+    let last: unknown;
+    for (const url of RPC_URLS) {
+      try {
+        return await rpcOnce<T>(url, params);
+      } catch (e) {
+        if (!(e instanceof Unavailable)) throw e;
+        last = e;
+      }
+    }
+    throw last ?? new Unavailable("no RPC configured");
+  });
+}
+
+/** A contract view with its freshness. */
+export async function viewRead<T>(
+  contract: string,
+  method: string,
+  args: object = {},
+): Promise<Read<T>> {
+  const r = await rpcQuery<{ result?: number[]; error?: string }>({
+    request_type: "call_function",
+    finality: "optimistic",
+    account_id: contract,
+    method_name: method,
+    args_base64: toBase64(JSON.stringify(args)),
+  });
+  if (!r.value.result) throw new ViewError(r.value.error ?? "view_failed");
+  return { ...r, value: JSON.parse(fromBytes(r.value.result)) as T };
+}
+
+export async function view<T>(contract: string, method: string, args: object = {}): Promise<T> {
+  return (await viewRead<T>(contract, method, args)).value;
+}
+
+export type AccountView = { amount: string; code_hash: string; storage_usage: number };
+export const viewAccount = (account: string) =>
+  rpcQuery<AccountView>({ request_type: "view_account", finality: "final", account_id: account });
+
+export type AccessKeyView = {
+  public_key: string;
+  access_key: { permission: "FullAccess" | Record<string, unknown> };
+};
+export const accessKeyList = (account: string) =>
+  rpcQuery<{ keys: AccessKeyView[] }>({
+    request_type: "view_access_key_list",
+    finality: "final",
+    account_id: account,
+    limit: 100,
+  });
 
 export const getConfig = () => view<Config>(CONTRACT, "get_config");
 export const getBudget = (id: string) =>
@@ -79,6 +212,8 @@ export function getToken(token: string): Promise<TokenMeta> {
   let meta = tokenMeta.get(token);
   if (!meta) {
     meta = view<TokenMeta>(token, "ft_metadata");
+    // A failed read isn't kept, so the next page tries again.
+    meta.catch(() => tokenMeta.delete(token));
     tokenMeta.set(token, meta);
   }
   return meta;
@@ -119,16 +254,22 @@ type TxDetail = {
 /** Transactions per page of history. The API allows 200; a page of 30 keeps the first view fast. */
 export const HISTORY_PAGE = 30;
 
-async function txApi<T>(path: string, body: object): Promise<T> {
-  const res = await fetch(`${TX_API}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    // No data cache: a cached page of history hid new payments until a second reload.
-    cache: "no-store",
+/** A FastNEAR tx API call with its freshness (no second provider, so: live, then last good). */
+export function txApiRead<T>(path: string, body: object): Promise<Read<T>> {
+  return withLastGood("tx", `tx ${path} ${JSON.stringify(body)}`, async () => {
+    // No data cache (`post` uses no-store): a cached page of history hid new payments.
+    const res = await post(`${TX_API}${path}`, body);
+    if (!res.ok) throw new Unavailable(`tx api ${res.status}`);
+    try {
+      return (await res.json()) as T;
+    } catch {
+      throw new Unavailable("tx api bad_json");
+    }
   });
-  if (!res.ok) throw new ViewError(`tx api ${res.status}`);
-  return (await res.json()) as T;
+}
+
+async function txApi<T>(path: string, body: object): Promise<T> {
+  return (await txApiRead<T>(path, body)).value;
 }
 
 /**
