@@ -628,3 +628,237 @@ fn escalation_description_uses_trezu_format_and_strips_breaks() {
         "* Title: Earmark request e1 <br>* Notes: Article * Url: https://evil.example · by alice.near · budget 0 <br>* Url: https://news.example/1"
     );
 }
+
+/// What a spend does: the tier it takes, or the reason code it fails with.
+type Outcome = Result<crate::Tier, String>;
+
+/// One starting state for the agreement test: the budget is funded with `balance`, then
+/// `setup` runs. The spend under test is made by `spender` to `payee` for `work`, as `id`.
+struct Scenario {
+    name: &'static str,
+    balance: u128,
+    setup: fn(&mut Contract),
+    spender: &'static str,
+    payee: &'static str,
+    id: &'static str,
+    work: &'static str,
+    /// When the spend under test runs (seconds).
+    now: u64,
+}
+
+fn predicted(c: &Contract, s: &Scenario, amount: u128) -> Outcome {
+    let check = c.check_spend(
+        U64(0),
+        account(s.spender),
+        s.id.to_owned(),
+        account(s.payee),
+        U128(amount),
+        s.work.to_owned(),
+    );
+    match (check.tier, check.blocked) {
+        (Some(tier), None) => Ok(tier),
+        (None, Some(reason)) => Err(reason.code().to_owned()),
+        _ => panic!("{}: check_spend must return a tier or a reason", s.name),
+    }
+}
+
+fn actual(c: &mut Contract, s: &Scenario, amount: u128) -> Outcome {
+    let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = c.request_spend(
+            U64(0),
+            s.id.to_owned(),
+            account(s.payee),
+            U128(amount),
+            String::new(),
+            s.work.to_owned(),
+            None,
+        );
+    }));
+    // The mocked VM panics with `... GuestPanic { panic_msg: "<code>" } ...`.
+    let code = |payload: Box<dyn std::any::Any + Send>| {
+        let text = payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+            .unwrap_or_default();
+        // Off-chain `require!` is a plain `assert!`, so its message is the code itself.
+        match text.split_once("panic_msg: \"") {
+            Some((_, rest)) => rest.split('"').next().unwrap_or_default().to_owned(),
+            None => text,
+        }
+    };
+    match run {
+        Ok(()) => Ok(c.get_request(s.id.to_owned()).unwrap().tier),
+        Err(payload) => Err(code(payload)),
+    }
+}
+
+/// R17: for every case the view predicts exactly what `request_spend` then does. Rules: auto
+/// limit 10, one-approver limit 50, spender period cap 200; amounts sit on each side of them.
+#[test]
+fn check_spend_agrees_with_request_spend() {
+    use crate::Tier::{Auto, Escalate, OneApprover};
+    let base = Scenario {
+        name: "fresh",
+        balance: 60,
+        setup: |_| {},
+        spender: "alice.near",
+        payee: "carol.near",
+        id: "r",
+        work: "w",
+        now: 0,
+    };
+    let near_cap = |c: &mut Contract| {
+        for i in 0..4 {
+            request(c, &format!("r{i}"), 48, &format!("issue-{i}"));
+        }
+    };
+    let scenarios = [
+        Scenario { ..base },
+        Scenario {
+            name: "40 reserved",
+            setup: |c| request(c, "r0", 40, "issue-0"),
+            ..base
+        },
+        Scenario {
+            name: "192 of the 200 period cap used",
+            balance: 300,
+            setup: near_cap,
+            ..base
+        },
+        Scenario {
+            name: "cap used last period, new period not rolled yet",
+            balance: 300,
+            setup: near_cap,
+            now: 2_592_000,
+            ..base
+        },
+        Scenario {
+            name: "empty work link",
+            work: " ",
+            ..base
+        },
+        Scenario {
+            name: "same work already paying",
+            setup: |c| request(c, "r0", 5, "w"),
+            ..base
+        },
+        Scenario {
+            name: "same work, overridden",
+            setup: |c| {
+                request(c, "r0", 5, "w");
+                at("bob.near", 0);
+                c.override_duplicate(
+                    U64(0),
+                    account("alice.near"),
+                    account("carol.near"),
+                    "w".to_owned(),
+                    "second instalment".to_owned(),
+                );
+            },
+            ..base
+        },
+        Scenario {
+            name: "same request id",
+            setup: |c| request(c, "r", 5, "issue-0"),
+            ..base
+        },
+        Scenario {
+            name: "payee not allowed",
+            payee: "dave.near",
+            ..base
+        },
+        Scenario {
+            name: "payee in delay",
+            setup: |c| {
+                at("bob.near", 0);
+                c.approve_payee(U64(0), account("dave.near"));
+            },
+            payee: "dave.near",
+            ..base
+        },
+        Scenario {
+            name: "spender paused",
+            setup: |c| {
+                at("bob.near", 0);
+                c.pause(U64(0), Some(account("alice.near")));
+            },
+            ..base
+        },
+        Scenario {
+            name: "budget paused",
+            setup: |c| {
+                at("bob.near", 0);
+                c.pause(U64(0), None);
+            },
+            ..base
+        },
+        Scenario {
+            name: "not a spender",
+            spender: "eve.near",
+            ..base
+        },
+        Scenario {
+            name: "budget closed",
+            setup: |c| {
+                at("club.sputnik-dao.near", 0);
+                let _ = c.close_envelope(U64(0));
+            },
+            ..base
+        },
+        Scenario {
+            name: "five open escalations",
+            setup: |c| {
+                for i in 0..crate::request::MAX_OPEN_ESCALATIONS {
+                    request(c, &format!("e{i}"), 300, &format!("issue-{i}"));
+                }
+            },
+            ..base
+        },
+    ];
+    let amounts = [0, 1, 10, 11, 21, 50, 51, 300];
+
+    let mut seen = std::collections::BTreeSet::new();
+    for s in &scenarios {
+        for amount in amounts {
+            // Mocked chain storage is per thread and outlives `testing_env!`, so each case
+            // gets a fresh thread.
+            let (predicted, actual) = std::thread::scope(|t| {
+                t.spawn(|| {
+                    let mut c = spending_contract(s.balance);
+                    (s.setup)(&mut c);
+                    at(s.spender, s.now);
+                    (predicted(&c, s, amount), actual(&mut c, s, amount))
+                })
+                .join()
+                .unwrap()
+            });
+            assert_eq!(predicted, actual, "{}, amount {amount}", s.name);
+            seen.insert(format!("{predicted:?}"));
+        }
+    }
+    // The cases reach every tier and each block reason they are built for.
+    let expected = [
+        Ok(Auto),
+        Ok(OneApprover),
+        Ok(Escalate),
+        Err("closed"),
+        Err("paused"),
+        Err("not_spender"),
+        Err("duplicate_request"),
+        Err("payee_not_allowed"),
+        Err("payee_pending"),
+        Err("duplicate_work"),
+        Err("over_available"),
+        Err("over_period_cap"),
+        Err("too_many_escalations"),
+        Err("invalid_input"),
+    ];
+    for outcome in expected {
+        let outcome: Outcome = outcome.map_err(str::to_owned);
+        assert!(
+            seen.contains(&format!("{outcome:?}")),
+            "never hit {outcome:?}"
+        );
+    }
+}

@@ -51,14 +51,20 @@ impl Contract {
         amount: U128,
         work_ref: String,
     ) -> SpendCheck {
-        match self.evaluate(
-            envelope_id.0,
-            &spender,
-            &request_id,
-            &payee,
-            amount.0,
-            &work_ref,
-        ) {
+        // Same text limits `request_spend` enforces first (memo and receipt aren't known here).
+        let checked = if valid_text(&request_id, &work_ref, "", None) {
+            self.evaluate(
+                envelope_id.0,
+                &spender,
+                &request_id,
+                &payee,
+                amount.0,
+                &work_ref,
+            )
+        } else {
+            Err(BlockReason::InvalidInput)
+        };
+        match checked {
             Ok(tier) => SpendCheck {
                 tier: Some(tier),
                 blocked: None,
@@ -457,9 +463,17 @@ impl Contract {
         if envelope.closed {
             return Err(BlockReason::Closed);
         }
-        let limits = envelope
+        let mut limits = envelope
             .spender_current(spender)
             .ok_or(BlockReason::NotSpender)?;
+        // A view runs before anything rolls the period: count a period that has ended as empty,
+        // as `request_spend` does after `roll_period`.
+        let period_start = envelope.current_period_start(env::block_timestamp());
+        let mut period_spent = envelope.period_spent;
+        if period_start != envelope.period_start_ns {
+            period_spent = 0;
+            limits.period_spent = U128(0);
+        }
         if envelope.paused || limits.paused {
             return Err(BlockReason::Paused);
         }
@@ -470,7 +484,6 @@ impl Contract {
             return Err(BlockReason::DuplicateRequest);
         }
         // R19: count of requests per period, and NEAR left for the storage a request uses
-        let period_start = envelope.current_period_start(env::block_timestamp());
         if self.requests_this_period(envelope_id, spender, period_start) >= MAX_REQUESTS_PER_PERIOD
         {
             return Err(BlockReason::TooManyRequests);
@@ -511,7 +524,7 @@ impl Contract {
             }
             let period_ok =
                 |spent: u128, cap: u128| spent.checked_add(amount).is_some_and(|t| t <= cap);
-            if !period_ok(envelope.period_spent, envelope.period_cap)
+            if !period_ok(period_spent, envelope.period_cap)
                 || !period_ok(limits.period_spent.0, limits.period_cap.0)
             {
                 return Err(BlockReason::OverPeriodCap);
