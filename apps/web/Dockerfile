@@ -9,6 +9,9 @@ COPY apps/web/package.json apps/web/
 COPY scripts/package.json scripts/
 RUN pnpm install --frozen-lockfile --filter @earmark/web
 COPY apps/web apps/web
+# Public settings are compiled into the client at build time, so each network gets its own image.
+# Empty means "use the testnet default" (config.ts treats "" as unset).
+ARG NEXT_PUBLIC_NETWORK= NEXT_PUBLIC_CONTRACT= NEXT_PUBLIC_DAO= NEXT_PUBLIC_CODE_HASH=
 RUN pnpm --dir apps/web build
 
 FROM node:24-slim

@@ -183,6 +183,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 | `make web` | Web app on http://localhost:3000, reading the testnet demo |
 | `make web-build` | Production build of the web app |
 | `make deploy` | Build on Cloud Build and deploy to Cloud Run |
+| `make deploy-mainnet MAINNET_DAO=…` | The same for the mainnet app (`earmark-mainnet`) |
 | `make try-refill` | Top up the "Try it" sandbox |
 | `make try-scenes` | Create the race and paused sandbox budgets (idempotent) |
 | `make try-limits` | Move the sandbox to 5 at once / 50 with one approval (DAO vote, then the 1-day delay) |
@@ -308,6 +309,7 @@ In [`scripts/testnet`](scripts/testnet):
 - Cloud Run service `earmark` in project `earmark-near-2026` (`us-central1`). Max 1 instance, scale to zero.
 - Image from [`apps/web/Dockerfile`](apps/web/Dockerfile) (Next.js standalone output, Node 24, non-root), built by Cloud Build ([`apps/web/cloudbuild.yaml`](apps/web/cloudbuild.yaml)). The upload follows [`.gcloudignore`](.gcloudignore), so no `.env` file leaves the machine.
 - The two sandbox keys are Secret Manager secrets `try-lead-key` and `try-council-key`, readable only by the service account `earmark-web`.
+- Mainnet: a second service `earmark-mainnet` from its own image, since `NEXT_PUBLIC_*` settings are compiled in at build time (`make deploy-mainnet MAINNET_DAO=<treasury>.sputnik-dao.near`, passed as Docker build args). It has no sandbox keys; "Try it" links to the testnet app.
 
 ## License
 

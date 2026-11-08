@@ -1,14 +1,23 @@
 # Builds the web image on Cloud Build and pushes it to Artifact Registry. From the repo root:
 #   gcloud builds submit --config apps/web/cloudbuild.yaml --substitutions=_TAG=$(git rev-parse --short HEAD)
+# Mainnet image: also pass _NETWORK=mainnet, _CONTRACT, _DAO, _CODE_HASH (`make deploy-mainnet`).
 substitutions:
   _REGION: us-central1
   _TAG: latest
+  _NETWORK: ""
+  _CONTRACT: ""
+  _DAO: ""
+  _CODE_HASH: ""
 steps:
   - name: gcr.io/cloud-builders/docker
     args:
       - build
       - -f
       - apps/web/Dockerfile
+      - --build-arg=NEXT_PUBLIC_NETWORK=${_NETWORK}
+      - --build-arg=NEXT_PUBLIC_CONTRACT=${_CONTRACT}
+      - --build-arg=NEXT_PUBLIC_DAO=${_DAO}
+      - --build-arg=NEXT_PUBLIC_CODE_HASH=${_CODE_HASH}
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/earmark/web:${_TAG}
       - .
