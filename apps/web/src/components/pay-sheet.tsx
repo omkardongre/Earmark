@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CONTRACT, txUrl } from "@/lib/config";
 import { BLOCKED, shortName, toBase } from "@/lib/format";
 import { view } from "@/lib/near";
+import { isAccountId, nearAmount, storageBalanceOf, storageBounds } from "@/lib/token";
 import type { BlockReason, RequestStatus, Tier, TokenMeta } from "@/lib/types";
 import { useToast } from "./toast";
 import { Avatar, Button, ButtonLink, ExternalLink, Pill } from "./ui";
@@ -59,11 +60,14 @@ const newId = () => crypto.randomUUID().replaceAll("-", "").slice(0, 24);
 
 export function PaySheet({
   budgetId,
+  token,
   payees,
   spenders,
   meta,
 }: {
   budgetId: string;
+  /** The budget's token: payees must be registered with it (NEP-145) to receive payments. */
+  token: string;
   payees: string[];
   spenders: string[];
   meta: TokenMeta;
@@ -87,6 +91,7 @@ export function PaySheet({
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => ({ ...d, [k]: v }));
   const { amount, payee, work, memo } = draft;
   const base = toBase(amount, meta);
+  const { reg, recheck } = useRegistration(token, payee || null);
 
   useEffect(() => {
     setCheck(null);
@@ -172,7 +177,21 @@ export function PaySheet({
     dialog.current?.showModal();
   };
 
+  /** Hides the modal sheet while the wallet asks (its popup can't sit above a modal). */
+  const aside = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    forWallet.current = true;
+    dialog.current?.close();
+    try {
+      return await fn();
+    } finally {
+      forWallet.current = false;
+      dialog.current?.showModal();
+    }
+  };
+
   const tier = check?.tier ? TIER[check.tier] : null;
+  const unregistered = reg.state === "missing";
+  const filled = Boolean(payee && base && work.trim());
   const amountText = `${amount.trim() || "0"} ${meta.symbol}`;
 
   return (
@@ -287,6 +306,17 @@ export function PaySheet({
                   />
                 </details>
 
+                {unregistered && (
+                  <RegisterPayee
+                    token={token}
+                    payee={payee}
+                    deposit={reg.deposit}
+                    symbol={meta.symbol}
+                    aside={aside}
+                    onDone={recheck}
+                  />
+                )}
+
                 <div className="min-h-12" aria-live="polite">
                   {check?.blocked ? (
                     <p className="flex items-start gap-2 text-rose-700">
@@ -298,6 +328,8 @@ export function PaySheet({
                       <Pill tone={tier.tone}>{tier.label}</Pill>
                       <span>{tier.hint}</span>
                     </p>
+                  ) : filled ? (
+                    <p className="text-sm text-muted">Checking…</p>
                   ) : (
                     <p className="text-sm text-muted">
                       {payee
@@ -314,7 +346,11 @@ export function PaySheet({
                 )}
 
                 <div className="space-y-2">
-                  <Button className="w-full" disabled={!check?.tier || busy} onClick={submit}>
+                  <Button
+                    className="w-full"
+                    disabled={!check?.tier || busy || unregistered}
+                    onClick={submit}
+                  >
                     {busy ? "Confirm in your wallet…" : tier ? tier.button(amountText) : "Send"}
                   </Button>
                   {tier && (
@@ -420,5 +456,99 @@ function Field({
       {children}
       {hint && <span className="block text-sm text-muted">{hint}</span>}
     </label>
+  );
+}
+
+export type Registration =
+  | { state: "idle" | "checking" | "registered" | "unknown" }
+  | { state: "missing"; deposit: string };
+
+/**
+ * Whether `account` is registered with `token` (NEP-145 `storage_balance_of`), and the deposit a
+ * registration needs (`storage_balance_bounds.min`) when it isn't. "unknown" when the token can't
+ * be read: then nothing is blocked. `recheck` reads it again, e.g. after registering.
+ */
+export function useRegistration(token: string | null, account: string | null) {
+  const [reg, setReg] = useState<Registration>({ state: "idle" });
+  const [tick, setTick] = useState(0);
+  const recheck = useCallback(() => setTick((t) => t + 1), []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `tick` asks for a fresh read
+  useEffect(() => {
+    if (!token || !account || !isAccountId(account)) {
+      setReg({ state: "idle" });
+      return;
+    }
+    let live = true;
+    setReg({ state: "checking" });
+    const t = setTimeout(async () => {
+      try {
+        const bal = await storageBalanceOf(token, account);
+        if (!live) return;
+        if (bal) {
+          setReg({ state: "registered" });
+          return;
+        }
+        const { min } = await storageBounds(token);
+        if (live) setReg({ state: "missing", deposit: min });
+      } catch {
+        if (live) setReg({ state: "unknown" });
+      }
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [token, account, tick]);
+  return { reg, recheck };
+}
+
+/**
+ * A payee the token doesn't know yet can't receive it, so the payment would fail. One click pays
+ * the token's registration deposit for them (`storage_deposit`, registration only), signed by the
+ * connected wallet. `aside` lets a modal step out of the way of the wallet popup.
+ */
+export function RegisterPayee({
+  token,
+  payee,
+  deposit,
+  symbol,
+  aside = (fn) => fn(),
+  onDone,
+}: {
+  token: string;
+  payee: string;
+  deposit: string;
+  symbol: string;
+  aside?: <T>(fn: () => Promise<T>) => Promise<T>;
+  onDone: () => void;
+}) {
+  const { call } = useWallet();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const register = async () => {
+    setBusy(true);
+    setError(null);
+    const r = await aside(() =>
+      call(
+        "storage_deposit",
+        { account_id: payee, registration_only: true },
+        { receiverId: token, deposit, gasTgas: 30 },
+      ),
+    );
+    setBusy(false);
+    if (r.ok) onDone();
+    else setError(r.error);
+  };
+  return (
+    <div className="space-y-3 rounded-xl bg-amber-50 px-4 py-3.5" role="status">
+      <p className="text-[15px]">
+        <span className="font-medium">{shortName(payee)}</span> can’t receive {symbol} yet. The
+        token needs a one-time registration for them.
+      </p>
+      {error && <p className="text-sm text-rose-700">{error}</p>}
+      <Button variant="secondary" className="w-full" disabled={busy} onClick={register}>
+        {busy ? "Confirm in your wallet…" : `Register payee (${nearAmount(deposit)})`}
+      </Button>
+    </div>
   );
 }

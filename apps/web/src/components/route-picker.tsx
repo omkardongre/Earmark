@@ -1,0 +1,153 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { CONTRACT } from "@/lib/config";
+import { BLOCKED, shortName, toBase } from "@/lib/format";
+import { view } from "@/lib/near";
+import type { BlockReason, Tier, TokenMeta } from "@/lib/types";
+import { Card, Pill, type Tone } from "./ui";
+
+type Check = { tier: Tier | null; blocked: BlockReason | null };
+
+/** Not on any budget's payee list: shows what happens to an unknown account. */
+const SOMEONE = "someone-else.testnet";
+
+const TIER: Record<Tier, { label: string; hint: string; tone: Tone }> = {
+  auto: { label: "Pays now", hint: "Within the lead’s own limit.", tone: "green" },
+  one_approver: {
+    label: "Needs one approval",
+    hint: "One council member signs, then it pays.",
+    tone: "amber",
+  },
+  escalate: { label: "DAO vote", hint: "Too big for the budget: the DAO decides.", tone: "blue" },
+};
+
+/** Plainer words for a visitor than the lead-facing `BLOCKED` text. */
+const WHY: Partial<Record<BlockReason, string>> = {
+  payee_not_allowed: "Not an approved payee. The council adds payees first.",
+  over_period_cap: "Over the lead’s limit for this period.",
+  paused: "Payments from this budget are paused.",
+};
+
+// A fresh request and work id per page view, so "already paid" never trips the demo.
+const rand = () => Math.random().toString(36).slice(2, 10);
+
+/**
+ * Amount + payee -> which path the payment takes, from the demo budget's real `check_spend`
+ * view for one of its leads. Read-only: no wallet, nothing is sent.
+ */
+export function RoutePicker({
+  budgetId,
+  lead,
+  payees,
+  meta,
+}: {
+  budgetId: string;
+  lead: string;
+  payees: string[];
+  meta: TokenMeta;
+}) {
+  const [amount, setAmount] = useState("5");
+  const [payee, setPayee] = useState(payees[0] ?? SOMEONE);
+  const [check, setCheck] = useState<Check | null>(null);
+  const [failed, setFailed] = useState(false);
+  const ids = useRef<{ request: string; work: string } | null>(null);
+  const base = toBase(amount, meta);
+
+  useEffect(() => {
+    setCheck(null);
+    setFailed(false);
+    if (!base) return;
+    ids.current ??= { request: `try-${rand()}`, work: `route-picker-${rand()}` };
+    const { request, work } = ids.current;
+    let live = true;
+    const t = setTimeout(async () => {
+      try {
+        const c = await view<Check>(CONTRACT, "check_spend", {
+          envelope_id: budgetId,
+          spender: lead,
+          request_id: request,
+          payee,
+          amount: base,
+          work_ref: work,
+        });
+        if (live) setCheck(c);
+      } catch {
+        if (live) setFailed(true);
+      }
+    }, 350);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [base, payee, budgetId, lead]);
+
+  const tier = check?.tier ? TIER[check.tier] : null;
+  const choices = [...payees.slice(0, 4), SOMEONE];
+
+  return (
+    <Card className="space-y-4 p-5">
+      <div>
+        <p className="font-semibold">What happens to a payment?</p>
+        <p className="text-sm text-muted">As {shortName(lead)}, a lead on the demo budget.</p>
+      </div>
+
+      <label className="flex items-baseline gap-2 rounded-xl bg-surface px-4 py-3 focus-within:ring-2 focus-within:ring-brand/30">
+        <span className="sr-only">Amount</span>
+        <input
+          className="tabular w-full min-w-0 bg-transparent text-2xl font-bold tracking-tight outline-none placeholder:text-slate-300"
+          inputMode="decimal"
+          placeholder="0"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <span className="font-semibold text-muted">{meta.symbol}</span>
+      </label>
+
+      <fieldset className="flex flex-wrap gap-1.5">
+        <legend className="mb-1.5 text-sm font-medium text-muted">To</legend>
+        {choices.map((p) => (
+          <button
+            key={p}
+            type="button"
+            aria-pressed={payee === p}
+            title={p === SOMEONE ? "An account that isn’t an approved payee" : p}
+            onClick={() => setPayee(p)}
+            className={`rounded-full px-3.5 py-1.5 text-sm font-medium ring-1 ring-inset ${
+              payee === p
+                ? "bg-ink text-white ring-ink"
+                : "bg-white text-muted ring-line hover:text-ink"
+            }`}
+          >
+            {p === SOMEONE ? "Someone else" : shortName(p)}
+          </button>
+        ))}
+      </fieldset>
+
+      <div className="min-h-12 border-t border-line pt-3.5" aria-live="polite">
+        {!base ? (
+          <p className="text-sm text-muted">Enter an amount.</p>
+        ) : failed ? (
+          <p className="text-sm text-muted">Couldn’t reach the contract. Try again in a moment.</p>
+        ) : check?.blocked ? (
+          <p className="flex items-start gap-2">
+            <Pill tone="red">Blocked</Pill>
+            <span className="text-[15px] text-muted">
+              {WHY[check.blocked] ?? BLOCKED[check.blocked]}
+            </span>
+          </p>
+        ) : tier ? (
+          <p className="flex items-start gap-2">
+            <Pill tone={tier.tone}>{tier.label}</Pill>
+            <span className="text-[15px] text-muted">{tier.hint}</span>
+          </p>
+        ) : (
+          <p className="text-sm text-muted">Checking…</p>
+        )}
+      </div>
+      <p className="text-xs text-subtle">
+        This asks the live contract the same check it runs before every payment.
+      </p>
+    </Card>
+  );
+}

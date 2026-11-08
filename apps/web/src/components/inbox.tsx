@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { CONTRACT } from "@/lib/config";
 import { ago, duration, STATUS, shortName, toBase } from "@/lib/format";
+import { view } from "@/lib/near";
+import { isAccountId } from "@/lib/token";
 import type { RequestStatus } from "@/lib/types";
+import { RegisterPayee, useRegistration } from "./pay-sheet";
 import { useToast } from "./toast";
 import {
   Button,
@@ -603,6 +607,25 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                     );
                   })}
                 </div>
+
+                <AddPayee
+                  budgetId={b.id}
+                  symbol={b.symbol}
+                  busy={busy === `p${b.id}`}
+                  onApprove={async (payee) => {
+                    const r = await run(`p${b.id}`, "approve_payee", {
+                      envelope_id: b.id,
+                      payee,
+                    });
+                    if (!r) return false;
+                    toast({
+                      ok: true,
+                      text: `${shortName(payee)} can be paid in ${later}. Any approver can cancel.`,
+                      tx: r.hash,
+                    });
+                    return true;
+                  }}
+                />
               </div>
             );
           })}
@@ -819,5 +842,81 @@ function RaiseButton({
         {busy ? "Confirm in wallet…" : "Queue"}
       </Button>
     </span>
+  );
+}
+
+/**
+ * Approve a new payee (queued: payable after the waiting period). Also checks the payee is
+ * registered with the budget's token (NEP-145); if not, offers the one-click registration, since
+ * a payment to an unregistered account fails.
+ */
+function AddPayee({
+  budgetId,
+  symbol,
+  busy,
+  onApprove,
+}: {
+  budgetId: string;
+  symbol: string;
+  busy: boolean;
+  onApprove: (payee: string) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [token, setToken] = useState<string | null>(null);
+  const payee = value.trim().toLowerCase();
+  const valid = isAccountId(payee);
+  const { reg, recheck } = useRegistration(token, valid ? payee : null);
+
+  useEffect(() => {
+    if (!open || token) return;
+    view<{ token_id: string } | null>(CONTRACT, "get_envelope", { envelope_id: budgetId })
+      .then((b) => setToken(b?.token_id ?? null))
+      .catch(() => {});
+  }, [open, token, budgetId]);
+
+  if (!open) {
+    return (
+      <Button variant="secondary" onClick={() => setOpen(true)}>
+        Add payee
+      </Button>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-muted">Add payee</p>
+      <div className="flex flex-wrap gap-2">
+        <input
+          className="h-11.5 min-w-0 flex-1 rounded-xl border border-slate-300 px-3.5 outline-none focus:border-brand focus:ring-4 focus:ring-brand/20"
+          placeholder="name.near"
+          aria-label="Payee account"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          autoCapitalize="none"
+          spellCheck={false}
+        />
+        <Button
+          disabled={!valid || busy}
+          onClick={async () => {
+            if (await onApprove(payee)) {
+              setValue("");
+              setOpen(false);
+            }
+          }}
+        >
+          {busy ? "Confirm in wallet…" : "Approve payee"}
+        </Button>
+      </div>
+      {payee && !valid && <p className="text-sm text-rose-700">That isn’t a NEAR account.</p>}
+      {token && reg.state === "missing" && (
+        <RegisterPayee
+          token={token}
+          payee={payee}
+          deposit={reg.deposit}
+          symbol={symbol}
+          onDone={recheck}
+        />
+      )}
+    </div>
   );
 }

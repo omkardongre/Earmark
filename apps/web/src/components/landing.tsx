@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { money } from "@/lib/format";
+import { getToken, listBudgets } from "@/lib/near";
 import type { SpendRequest, Tier, TokenMeta } from "@/lib/types";
+import { RoutePicker } from "./route-picker";
 import { ButtonLink } from "./ui";
 
 const TILES: { tier: Tier; title: string; text: string }[] = [
@@ -13,31 +15,42 @@ const PAID = new Set(["paid", "paid_by_dao"]);
 
 /**
  * The intro for visitors who aren't signed in: what Earmark does in one line, how the demo
- * budget's real payments split across the three paths, and two ways to try it.
+ * budget's real payments split across the three paths, a picker that asks the contract which path a
+ * payment would take, and two ways to try it.
  */
-export function Landing({
+export async function Landing({
   requests,
   meta,
 }: {
   requests: [string, SpendRequest][];
   meta: TokenMeta | undefined;
 }) {
+  const demo = await demoLead();
   return (
     <section className="space-y-8 pb-4">
-      <div className="max-w-2xl space-y-4">
-        <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-          The DAO votes once. Teams pay contributors within limits.
-        </h1>
-        <p className="text-lg text-muted">
-          Small payments go out at once, bigger ones need one approval, and anything larger goes to
-          a normal DAO vote. The rules live in a contract that has no admin key.
-        </p>
-        <div className="flex flex-wrap gap-3 pt-1">
-          <ButtonLink href="/try">Try it, no wallet</ButtonLink>
-          <ButtonLink href="/preview" variant="secondary">
-            Replay a real DAO’s history
-          </ButtonLink>
+      <div className="grid items-center gap-8 lg:grid-cols-[1fr_22rem]">
+        <div className="max-w-2xl space-y-4">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+            The DAO votes once. Teams pay contributors within limits.
+          </h1>
+          <p className="text-lg text-muted">
+            Small payments go out at once, bigger ones need one approval, and anything larger goes
+            to a normal DAO vote. The rules live in a contract that has no admin key.
+          </p>
+          <div className="flex flex-wrap gap-3 pt-1">
+            <ButtonLink href="/try">Try it, no wallet</ButtonLink>
+            <ButtonLink href="/preview" variant="secondary">
+              Replay a real DAO’s history
+            </ButtonLink>
+          </div>
+          <p className="text-sm text-muted">
+            <Link href="/verify" className="font-medium text-brand hover:underline">
+              Check it yourself
+            </Link>
+            : 0 admin keys, balances add up, live from the chain.
+          </p>
         </div>
+        {demo && <RoutePicker {...demo} />}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -63,4 +76,19 @@ export function Landing({
       </div>
     </section>
   );
+}
+
+/** The demo budget (first open one with a lead and payees) and its first active lead. */
+async function demoLead() {
+  try {
+    const b = (await listBudgets()).find(
+      (x) => !x.closed && !x.paused && x.payees.length > 0 && x.spenders.some(([, l]) => !l.paused),
+    );
+    const lead = b?.spenders.find(([, l]) => !l.paused)?.[0];
+    if (!b || !lead) return null;
+    return { budgetId: b.id, lead, payees: b.payees, meta: await getToken(b.token_id) };
+  } catch {
+    // No picker is better than a broken one.
+    return null;
+  }
 }

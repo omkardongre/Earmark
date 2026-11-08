@@ -85,7 +85,21 @@ export default async function BudgetPage({ params }: { params: Promise<{ id: str
         </div>
 
         <div className="min-w-0 space-y-10 lg:order-1">
-          <Section title="Payments">
+          <Section
+            title="Payments"
+            action={
+              Number(b.request_count) > 0 && (
+                // A plain link: the route handler sends the file as a download.
+                <a
+                  href={`/api/export/${id}`}
+                  download
+                  className="rounded-lg px-3 py-1.5 text-sm font-semibold text-brand hover:bg-brand-soft"
+                >
+                  Download CSV
+                </a>
+              )
+            }
+          >
             <PaymentsTable budgetId={id} first={first} total={Number(b.request_count)} meta={m} />
           </Section>
           <Section title="Other activity">

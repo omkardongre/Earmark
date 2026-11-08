@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { money, units } from "@/lib/format";
 import type { Budget, TokenMeta } from "@/lib/types";
+import { AnimatedNumber } from "./animated-number";
 import { ApproveBadge } from "./approve-badge";
 import { PaySheet } from "./pay-sheet";
 import { ButtonLink, Card, Pill } from "./ui";
@@ -41,7 +42,7 @@ export function BudgetCard({
       </div>
       <div className="space-y-3">
         <p className="tabular text-4xl font-bold tracking-tight">
-          {units(b.available, m)}{" "}
+          <AnimatedNumber value={b.available} meta={m} />{" "}
           <span className="text-lg font-semibold text-muted">{m.symbol}</span>
           {link && (
             <span className="ml-2 align-middle text-base font-medium text-muted">available</span>
@@ -52,15 +53,24 @@ export function BudgetCard({
           role="img"
           aria-label={`${units(b.available, m)} of ${money(funded, m)} left`}
         >
-          <div className="h-full rounded-full bg-brand" style={{ width: `${leftPct}%` }} />
+          <div
+            className="h-full rounded-full bg-brand motion-safe:transition-[width] motion-safe:duration-700"
+            style={{ width: `${leftPct}%` }}
+          />
         </div>
         <p className="tabular text-muted">
-          {waiting > 0n && <>{money(waiting, m)} waiting for approval · </>}
-          {money(b.spent_total, m)} paid out
+          {waiting > 0n && (
+            <>
+              <AnimatedNumber value={waiting.toString()} meta={m} /> {m.symbol} waiting for approval
+              ·{" "}
+            </>
+          )}
+          <AnimatedNumber value={b.spent_total} meta={m} /> {m.symbol} paid out
         </p>
         {period && (
           <p className="tabular text-muted">
-            {units(b.period_spent, m)} of {money(b.period_cap, m)} used this period ({period})
+            <AnimatedNumber value={b.period_spent} meta={m} /> of {money(b.period_cap, m)} used this
+            period ({period})
           </p>
         )}
       </div>
@@ -68,6 +78,7 @@ export function BudgetCard({
         <div className="flex flex-wrap gap-2">
           <PaySheet
             budgetId={b.id}
+            token={b.token_id}
             payees={b.payees}
             spenders={b.spenders.map(([a]) => a)}
             meta={m}
