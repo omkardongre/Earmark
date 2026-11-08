@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { NETWORK } from "@/lib/config";
 import { CHANGED, useWallet } from "./wallet";
 
 /**
@@ -39,7 +40,8 @@ export function NavLinks({
     ...(waiting !== undefined ? [{ href: "/approvals", label: "Approvals", badge: waiting }] : []),
     { href: "/people", label: "People" },
     { href: "/preview", label: "Replay" },
-    ...(accountId ? [] : [{ href: "/try", label: "Try it" }]),
+    // "Try it" is a testnet sandbox; the mainnet landing links to it instead.
+    ...(accountId || NETWORK === "mainnet" ? [] : [{ href: "/try", label: "Try it" }]),
   ];
   return (
     <nav

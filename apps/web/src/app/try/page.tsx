@@ -1,6 +1,7 @@
 import { TryPanel } from "@/components/try-panel";
 import { Card, Disclosure, Empty, ExternalLink } from "@/components/ui";
-import { accountUrl } from "@/lib/config";
+import { redirect } from "next/navigation";
+import { accountUrl, NETWORK, TRY_URL } from "@/lib/config";
 import { units } from "@/lib/format";
 import { amounts, getTryBudget, TRY, tryEnabled } from "@/lib/try";
 
@@ -10,6 +11,8 @@ const META = { symbol: "tUSDC", decimals: 6 };
 
 /** No-wallet sandbox: a visitor plays the team lead of a small testnet budget. */
 export default async function TryPage() {
+  // The sandbox and its keys are on testnet; the mainnet app sends visitors there.
+  if (NETWORK === "mainnet") redirect(TRY_URL);
   const budget = tryEnabled() ? await getTryBudget().catch(() => null) : null;
   const limit = budget?.spenders[0]?.[1].auto_limit;
 

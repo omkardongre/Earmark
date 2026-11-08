@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NETWORK, TRY_URL } from "@/lib/config";
 import { money, shortName } from "@/lib/format";
 import { getToken, listBudgets } from "@/lib/near";
 import type { SpendRequest, Tier, TokenMeta } from "@/lib/types";
@@ -42,7 +43,9 @@ export async function Landing({
             .
           </p>
           <div className="flex flex-wrap gap-3 pt-1">
-            <ButtonLink href="/try">Try it, no wallet</ButtonLink>
+            <ButtonLink href={TRY_URL}>
+              {NETWORK === "mainnet" ? "Try it on testnet, no wallet" : "Try it, no wallet"}
+            </ButtonLink>
             <ButtonLink href="/preview" variant="secondary">
               Replay a real DAO’s history
             </ButtonLink>

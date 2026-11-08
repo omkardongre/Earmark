@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CONTRACT } from "@/lib/config";
+import { CONTRACT, NETWORK } from "@/lib/config";
 import { BLOCKED, shortName, toBase } from "@/lib/format";
 import { view } from "@/lib/near";
 import type { BlockReason, Tier, TokenMeta } from "@/lib/types";
@@ -10,7 +10,7 @@ import { Card, Pill, type Tone } from "./ui";
 type Check = { tier: Tier | null; blocked: BlockReason | null };
 
 /** Not on any budget's payee list: shows what happens to an unknown account. */
-const SOMEONE = "someone-else.testnet";
+const SOMEONE = NETWORK === "mainnet" ? "someone-else.near" : "someone-else.testnet";
 
 const TIER: Record<Tier, { label: string; hint: string; tone: Tone }> = {
   auto: { label: "Pays now", hint: "Within the lead’s own limit.", tone: "green" },
