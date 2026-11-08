@@ -4,7 +4,7 @@ import { ActivityList } from "@/components/activity-list";
 import { Avatar, Card, Disclosure, ExternalLink, Pill, Section } from "@/components/ui";
 import { accountUrl } from "@/lib/config";
 import { loadActivity, loadBase } from "@/lib/data";
-import { ago, duration, money } from "@/lib/format";
+import { ago, duration, money, shortName } from "@/lib/format";
 import { getPayeeRecord, getRecord, isEligible } from "@/lib/near";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export default async function PersonPage({ params }: { params: Promise<{ account
     loadActivity(base, { account }),
   ]);
   const { config, budgets, meta } = base;
-  const name = account.split(".")[0] ?? account;
+  const name = shortName(account);
 
   const roles = budgets.flatMap((b) => {
     const r: string[] = [];

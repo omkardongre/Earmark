@@ -89,7 +89,7 @@ export function RoutePicker({
     <Card className="space-y-4 p-5">
       <div>
         <p className="font-semibold">What happens to a payment?</p>
-        <p className="text-sm text-muted">As {shortName(lead)}, a lead on the demo budget.</p>
+        <p className="text-sm text-muted">On the demo budget, checked by the live contract.</p>
       </div>
 
       <label className="flex items-baseline gap-2 rounded-xl bg-surface px-4 py-3 focus-within:ring-2 focus-within:ring-brand/30">
@@ -145,9 +145,6 @@ export function RoutePicker({
           <p className="text-sm text-muted">Checking…</p>
         )}
       </div>
-      <p className="text-xs text-subtle">
-        This asks the live contract the same check it runs before every payment.
-      </p>
     </Card>
   );
 }

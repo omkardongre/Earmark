@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Avatar, Card, Empty, Pill, Section } from "@/components/ui";
 import { loadBase } from "@/lib/data";
-import { ago, duration, money } from "@/lib/format";
+import { ago, duration, money, shortName } from "@/lib/format";
 import { getPayeeRecord, getRecord, isEligible } from "@/lib/near";
 
 export const dynamic = "force-dynamic";
@@ -112,7 +112,7 @@ function Row({ account, children }: { account: string; children: React.ReactNode
     >
       <span className="flex shrink-0 items-center gap-3">
         <Avatar id={account} />
-        <span className="font-medium">{account.split(".")[0]}</span>
+        <span className="font-medium">{shortName(account)}</span>
       </span>
       <span className="flex min-w-0 flex-col items-end gap-0.5 text-right">{children}</span>
     </Link>

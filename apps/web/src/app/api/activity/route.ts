@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     (cursor !== undefined && !/^\d{1,30}$/.test(cursor)) ||
     (budget !== undefined && !/^\d{1,20}$/.test(budget)) ||
     (account !== undefined && !/^[a-z0-9._-]{2,64}$/.test(account)) ||
-    (skip !== null && skip !== "payments")
+    (skip !== null && skip !== "payments" && skip !== "changes")
   ) {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
@@ -24,6 +24,7 @@ export async function GET(req: Request) {
     budget,
     account,
     skipPayments: skip === "payments",
+    skipChanges: skip === "changes",
   });
   return NextResponse.json(page, { headers: { "Cache-Control": "no-store" } });
 }

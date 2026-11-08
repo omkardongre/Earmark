@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
+import { shortName } from "@/lib/format";
 
 export type Tone = "green" | "amber" | "blue" | "gray" | "red" | "brand";
 
@@ -137,7 +138,8 @@ export function Disclosure({
 }: {
   title: string;
   hint?: ReactNode;
-  open?: boolean;
+  /** Opens the panel; left out, the user's own open/close is kept. */
+  open?: boolean | undefined;
   children: ReactNode;
 }) {
   return (
@@ -175,7 +177,7 @@ export function Avatar({ id, size = "sm" }: { id: string; size?: "sm" | "lg" }) 
 }
 
 export function Person({ id }: { id: string }) {
-  const name = id.split(".")[0] ?? id;
+  const name = shortName(id);
   return (
     <Link
       href={`/people/${id}`}

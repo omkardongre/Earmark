@@ -53,17 +53,21 @@ export async function loadActivity(
     budget,
     account,
     skipPayments = false,
+    skipChanges = false,
   }: {
     cursor?: string | null | undefined;
     budget?: string | undefined;
     account?: string | undefined;
     /** Leave out payment rows, where a payments table already lists them. */
     skipPayments?: boolean;
+    /** Leave out rule changes (the home feed is about money). */
+    skipChanges?: boolean;
   } = {},
 ): Promise<ActivityPage> {
   const fallback = base.meta.values().next().value as TokenMeta | undefined;
   const requests = new Map<string, SpendRequest>();
   const items: Activity[] = [];
+  const keys = new Set<string>();
   let next: string | null = cursor ?? null;
   try {
     for (let i = 0; i < 6; i++) {
@@ -73,9 +77,15 @@ export async function loadActivity(
         (a) =>
           (budget === undefined || a.budget === budget) &&
           (account === undefined || a.people.includes(account)) &&
-          (!skipPayments || a.requestId === null),
+          (!skipPayments || a.requestId === null) &&
+          (!skipChanges || !a.isChange),
       );
-      items.push(...rows);
+      // A payment's earlier steps can sit on an older history page: keep its newest row.
+      for (const a of rows) {
+        if (keys.has(a.key)) continue;
+        keys.add(a.key);
+        items.push(a);
+      }
       next = page.next;
       if (!next || items.length >= FEED_PAGE) break;
     }
@@ -98,6 +108,20 @@ async function fillRequests(events: EarmarkEvent[], into: Map<string, SpendReque
   ];
   const found = await Promise.all(ids.map(async (id) => [id, await getRequest(id)] as const));
   for (const [id, r] of found) if (r) into.set(id, r);
+}
+
+/** approver -> payments waiting in their budgets. Drives the Approvals tab and its badge. */
+export async function approverQueue(): Promise<Record<string, number>> {
+  try {
+    const out: Record<string, number> = {};
+    for (const b of await listBudgets()) {
+      if (b.closed) continue;
+      for (const a of b.approvers) out[a] = (out[a] ?? 0) + b.pending_requests.length;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 export type PauseInfo = { by: string; ns: string };

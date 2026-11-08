@@ -23,6 +23,8 @@ export function ActivityList({
   budget,
   account,
   skipPayments = false,
+  skipChanges = false,
+  pageSize = PAGE,
   empty = "No activity yet.",
 }: {
   first: ActivityPage;
@@ -30,11 +32,15 @@ export function ActivityList({
   account?: string;
   /** Leave out payment rows (the budget page lists payments in their own table). */
   skipPayments?: boolean;
+  /** Leave out rule changes (the home feed shows money only). */
+  skipChanges?: boolean;
+  /** Rows shown at first and per "Show more". */
+  pageSize?: number;
   empty?: React.ReactNode;
 }) {
   const [items, setItems] = useState(first.items);
   const [next, setNext] = useState(first.next);
-  const [shown, setShown] = useState(PAGE);
+  const [shown, setShown] = useState(pageSize);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -45,11 +51,12 @@ export function ActivityList({
       if (budget !== undefined) q.set("budget", budget);
       if (account !== undefined) q.set("account", account);
       if (skipPayments) q.set("skip", "payments");
+      else if (skipChanges) q.set("skip", "changes");
       const res = await fetch(`/api/activity?${q}`, { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
       return (await res.json()) as ActivityPage;
     },
-    [budget, account, skipPayments],
+    [budget, account, skipPayments, skipChanges],
   );
 
   // After the user's own action, put the newest rows on top without losing what's loaded below.
@@ -73,7 +80,7 @@ export function ActivityList({
 
   const more = async () => {
     if (shown < items.length) {
-      setShown((n) => n + PAGE);
+      setShown((n) => n + pageSize);
       return;
     }
     if (!next) return;
@@ -83,7 +90,7 @@ export function ActivityList({
       const page = await fetchPage(next);
       setItems((xs) => unique([...xs, ...page.items]));
       setNext(page.next);
-      setShown((n) => n + PAGE);
+      setShown((n) => n + pageSize);
     } catch {
       setFailed(true);
     } finally {

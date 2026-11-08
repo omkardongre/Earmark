@@ -23,10 +23,18 @@ export function toBase(input: string, meta: TokenMeta): string | null {
   return v > 0n ? v.toString() : null;
 }
 
-/** "alice.earmark.testnet" -> "alice". Full id is kept in titles and links. */
+/**
+ * "sofia-reyes.earmark.testnet" -> "Sofia Reyes": the name people read. The full account is kept
+ * in titles, links and wherever the exact account matters (the pay sheet, the wallet).
+ */
 export function shortName(account: string): string {
+  if (account.length === 64) return `${account.slice(0, 6)}…${account.slice(-4)}`;
   const first = account.split(".")[0] ?? account;
-  return account.length === 64 ? `${account.slice(0, 6)}…${account.slice(-4)}` : first;
+  return first
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 export function ago(ns: string | bigint): string {

@@ -3,8 +3,7 @@ import { ActivityList } from "@/components/activity-list";
 import { BudgetCard } from "@/components/budget-card";
 import { Landing } from "@/components/landing";
 import { SignedOut } from "@/components/signed-out";
-import { Disclosure, Empty, ExternalLink, Section } from "@/components/ui";
-import { accountUrl } from "@/lib/config";
+import { Empty, Section } from "@/components/ui";
 import { loadActivity, loadBase } from "@/lib/data";
 import { listRequests } from "@/lib/near";
 
@@ -12,11 +11,11 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const base = await loadBase();
-  const { config, budgets, meta } = base;
+  const { budgets, meta } = base;
   const open = budgets.filter((b) => !b.closed);
   const closed = budgets.filter((b) => b.closed);
   const [activity, requests] = await Promise.all([
-    loadActivity(base),
+    loadActivity(base, { skipChanges: true }),
     Promise.all(open.map((b) => listRequests(b.id, { limit: 100 }))).then((l) => l.flat()),
   ]);
 
@@ -62,27 +61,14 @@ export default async function Home() {
         </p>
       )}
 
-      <Section title="Recent activity">
-        <ActivityList first={activity} empty="No payments yet. Make the first one above." />
+      <Section title="Recent payments">
+        <ActivityList
+          first={activity}
+          skipChanges
+          pageSize={5}
+          empty="No payments yet. Make the first one above."
+        />
       </Section>
-
-      <Disclosure title="How it works">
-        <div className="space-y-2 px-5 py-4 text-muted">
-          <p>
-            The DAO gives each team a budget once. Small payments go out at once, bigger ones need
-            one approval, and anything larger goes to a normal DAO vote.
-          </p>
-          <p>
-            DAO: <ExternalLink href={accountUrl(config.dao_id)}>{config.dao_id}</ExternalLink>
-          </p>
-          <p>
-            <Link href="/verify" className="font-medium text-brand hover:underline">
-              Check the contract yourself
-            </Link>
-            : no admin keys, code changes only by DAO vote, balances add up.
-          </p>
-        </div>
-      </Disclosure>
     </div>
   );
 }

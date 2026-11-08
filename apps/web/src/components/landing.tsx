@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { money } from "@/lib/format";
+import { money, shortName } from "@/lib/format";
 import { getToken, listBudgets } from "@/lib/near";
 import type { SpendRequest, Tier, TokenMeta } from "@/lib/types";
 import { RoutePicker } from "./route-picker";
@@ -35,7 +35,11 @@ export async function Landing({
           </h1>
           <p className="text-lg text-muted">
             Small payments go out at once, bigger ones need one approval, and anything larger goes
-            to a normal DAO vote. The rules live in a contract that has no admin key.
+            to a normal DAO vote. The rules live in a contract that has{" "}
+            <Link href="/verify" className="font-medium text-brand hover:underline">
+              no admin key
+            </Link>
+            .
           </p>
           <div className="flex flex-wrap gap-3 pt-1">
             <ButtonLink href="/try">Try it, no wallet</ButtonLink>
@@ -43,12 +47,6 @@ export async function Landing({
               Replay a real DAO’s history
             </ButtonLink>
           </div>
-          <p className="text-sm text-muted">
-            <Link href="/verify" className="font-medium text-brand hover:underline">
-              Check it yourself
-            </Link>
-            : 0 admin keys, balances add up, live from the chain.
-          </p>
         </div>
         {demo && <RoutePicker {...demo} />}
       </div>
@@ -67,7 +65,7 @@ export async function Landing({
                   href={`/payments/${encodeURIComponent(latest[0])}`}
                   className="mt-3 block text-sm font-medium text-brand hover:underline"
                 >
-                  Latest: {money(latest[1].amount, meta)} to {latest[1].payee.split(".")[0]} →
+                  Latest: {money(latest[1].amount, meta)} to {shortName(latest[1].payee)} →
                 </Link>
               )}
             </div>

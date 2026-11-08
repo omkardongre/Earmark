@@ -18,7 +18,13 @@ export type Activity = {
   budget: string | undefined;
   /** Accounts named in the row, for the person page. */
   people: string[];
+  /** Rule changes (queued, applied, cancelled) are left out of the home feed. */
+  isChange: boolean;
 };
+
+/** Which event of a payment its single row shows: the latest step wins. */
+const STEP: Record<string, number> = { spend_requested: 1, spend_approved: 2 };
+const step = (event: string) => STEP[event] ?? 3;
 
 type Change = Record<string, Record<string, string | null> | undefined>;
 
@@ -88,6 +94,7 @@ export function activityFeed(
   metaFor: (budget: string) => TokenMeta | undefined,
 ): Activity[] {
   const out: Activity[] = [];
+  const ranks: number[] = [];
   // Keys must stay the same across fetches (the feed merges a refreshed first page into what's
   // loaded), so they come from the transaction and the event, not the position in the page.
   const seen = new Map<string, number>();
@@ -222,14 +229,34 @@ export function activityFeed(
     if (row) {
       out.push({
         ...row,
-        key: `${base}-${nth}`,
+        // One row per payment: the key is the payment, so the feed's merge of pages keeps one.
+        key: req && requestId ? `req-${requestId}` : `${base}-${nth}`,
         requestId: req ? requestId : null,
         tx: e.tx,
         timestampNs: e.timestampNs,
         budget,
         people,
+        isChange: e.event.startsWith("change_"),
       });
+      ranks.push(step(e.event));
     }
   });
-  return out;
+  // A payment's steps (asked, approved, paid) collapse into one row showing the latest step.
+  // Events come newest first, so the first row kept for a payment sits where it happened last.
+  const best = new Map<string, number>();
+  out.forEach((a, i) => {
+    if (!a.requestId) return;
+    const j = best.get(a.requestId);
+    if (j === undefined || (ranks[i] ?? 0) > (ranks[j] ?? 0)) best.set(a.requestId, i);
+  });
+  const first = new Map<string, number>();
+  out.forEach((a, i) => {
+    if (a.requestId && !first.has(a.requestId)) first.set(a.requestId, i);
+  });
+  return out.flatMap((a, i) => {
+    if (!a.requestId) return [a];
+    if (first.get(a.requestId) !== i) return [];
+    const b = out[best.get(a.requestId) ?? i] ?? a;
+    return [{ ...b, timestampNs: a.timestampNs }];
+  });
 }
