@@ -1,0 +1,18 @@
+# Builds the web image on Cloud Build and pushes it to Artifact Registry. From the repo root:
+#   gcloud builds submit --config apps/web/cloudbuild.yaml --substitutions=_TAG=$(git rev-parse --short HEAD)
+substitutions:
+  _REGION: us-central1
+  _TAG: latest
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - apps/web/Dockerfile
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/earmark/web:${_TAG}
+      - .
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/earmark/web:${_TAG}
+options:
+  logging: CLOUD_LOGGING_ONLY

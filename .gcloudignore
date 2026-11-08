@@ -1,0 +1,7 @@
+# Upload for Cloud Build: same exclusions as git (no .env files, node_modules or build output),
+# plus folders the web image doesn't need.
+#!include:.gitignore
+.git
+target
+contracts
+fixtures
