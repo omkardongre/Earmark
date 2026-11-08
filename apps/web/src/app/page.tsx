@@ -25,10 +25,21 @@ export default async function Home() {
       <SignedOut>
         <Landing requests={requests} meta={meta.values().next().value} />
       </SignedOut>
-      <h2 className="text-2xl font-bold tracking-tight">Budgets</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-2xl font-bold tracking-tight">Budgets</h2>
+        <Link href="/setup" className="text-[15px] font-medium text-brand hover:underline">
+          New budget
+        </Link>
+      </div>
 
       {open.length === 0 ? (
-        <Empty>No budgets yet. The DAO creates one with a proposal.</Empty>
+        <Empty>
+          No budgets yet.{" "}
+          <Link href="/setup" className="font-medium text-brand hover:underline">
+            Set one up
+          </Link>{" "}
+          and the DAO votes on it.
+        </Empty>
       ) : (
         <div className={`grid gap-4 ${open.length > 1 ? "md:grid-cols-2" : ""}`}>
           {open.map((b) => {
@@ -63,6 +74,12 @@ export default async function Home() {
           </p>
           <p>
             DAO: <ExternalLink href={accountUrl(config.dao_id)}>{config.dao_id}</ExternalLink>
+          </p>
+          <p>
+            <Link href="/verify" className="font-medium text-brand hover:underline">
+              Check the contract yourself
+            </Link>
+            : no admin keys, code changes only by DAO vote, balances add up.
           </p>
         </div>
       </Disclosure>
