@@ -20,8 +20,11 @@ export type PlannedProposal = {
 type Sent = { id: number; hash: string };
 type State = { status: "idle" | "signing" | "error"; error?: string } | ({ status: "done" } & Sent);
 
-export const nearAmount = (yocto: string) => {
-  const milli = Number(BigInt(yocto) / 10n ** 21n);
+/** yoctoNEAR -> "0.1 NEAR" (to 0.001). "up" rounds up, for amounts someone has to send. */
+export const nearAmount = (yocto: string, round: "down" | "up" = "down") => {
+  const unit = 10n ** 21n;
+  const v = BigInt(yocto);
+  const milli = Number(round === "up" ? (v + unit - 1n) / unit : v / unit);
   return `${(milli / 1000).toLocaleString("en-US", { maximumFractionDigits: 3 })} NEAR`;
 };
 
@@ -31,6 +34,7 @@ export function SetupReview({
   policy,
   plan,
   later,
+  stop,
   onBack,
   onSent,
 }: {
@@ -39,6 +43,8 @@ export function SetupReview({
   plan: PlannedProposal[];
   /** A step that can only be filed after these pass (funding). */
   later: string;
+  /** Why filing would fail on chain (and what to do); blocks Submit. */
+  stop?: string | null;
   onBack: () => void;
   onSent: (sent: Record<string, Sent>) => void;
 }) {
@@ -150,6 +156,11 @@ export function SetupReview({
           vote.
         </p>
       )}
+      {stop && !allDone && (
+        <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {stop} Then go Back and review again.
+        </p>
+      )}
       {blocked.length > 0 && (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {accountId} can’t file{" "}
@@ -164,7 +175,7 @@ export function SetupReview({
           {!accountId ? (
             <Button onClick={connect}>Connect wallet</Button>
           ) : (
-            <Button onClick={submit} disabled={busy || allDone || blocked.length > 0}>
+            <Button onClick={submit} disabled={busy || allDone || blocked.length > 0 || !!stop}>
               {busy
                 ? "Waiting for wallet…"
                 : Object.values(states).some((s) => s.status === "error")

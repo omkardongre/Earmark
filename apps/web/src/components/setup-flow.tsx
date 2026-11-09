@@ -12,11 +12,12 @@ import {
   ftBalance,
   ftRegistered,
   getPolicy,
+  maxBig,
   suggestedApprovers,
   validAccountId,
 } from "@/lib/dao";
 import { money, shortName } from "@/lib/format";
-import { getConfig, getToken } from "@/lib/near";
+import { freeNear, getConfig, getToken } from "@/lib/near";
 import type { TokenMeta } from "@/lib/types";
 import {
   type BudgetForm,
@@ -30,6 +31,9 @@ import { SetupFund } from "./setup-fund";
 import { nearAmount, type PlannedProposal, SetupReview } from "./setup-review";
 import { Button, Card } from "./ui";
 import { useWallet } from "./wallet";
+
+/** What storing one proposal costs a DAO with no bond (Sputnik charges its own balance). */
+const PROPOSAL_STORAGE = 10n ** 22n;
 
 type Dao = {
   id: string;
@@ -67,6 +71,8 @@ export function SetupFlow({
   const [form, setForm] = useState<BudgetForm | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [warnings, setWarnings] = useState<string[]>([]);
+  /** Stops filing: the vote would pass and then fail on chain. */
+  const [stop, setStop] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [review, setReview] = useState<{
     plan: PlannedProposal[];
@@ -139,11 +145,22 @@ export function SetupFlow({
     }
     // Not blocking: the funding vote runs later, and payees can register with the token later.
     const notes: string[] = [];
-    const [daoHolds, contractReady, payeeReady] = await Promise.all([
+    const kind = createEnvelopeKind(CONTRACT, envelope);
+    const storageDeposit = BigInt(kind.FunctionCall.actions[0]?.deposit ?? "0");
+    const [daoHolds, contractReady, payeeReady, daoFree] = await Promise.all([
       ftBalance(form.token, dao.id).catch(() => null),
       ftRegistered(form.token, CONTRACT).catch(() => true),
       Promise.all(envelope.payees.map((p) => ftRegistered(form.token, p).catch(() => true))),
+      freeNear(dao.id).catch(() => null),
     ]);
+    // The DAO pays the budget's storage when the vote runs, and with no bond it also pays for
+    // storing each proposal (~0.01 NEAR). A new Trezu treasury starts with ~0.07 NEAR free.
+    const daoNeeds = storageDeposit + PROPOSAL_STORAGE * 3n;
+    setStop(
+      daoFree !== null && daoFree < daoNeeds
+        ? `Add ${nearAmount((daoNeeds - daoFree).toString(), "up")} to ${dao.id} first. The budget vote sends ${nearAmount(storageDeposit.toString())} from it for storage, and the DAO has ${nearAmount(daoFree.toString())} free.`
+        : null,
+    );
     if (daoHolds !== null && BigInt(daoHolds) < BigInt(envelope.period_cap))
       notes.push(
         `The DAO holds ${money(daoHolds, meta)}. Funding needs ${money(envelope.period_cap, meta)} when it runs.`,
@@ -165,17 +182,12 @@ export function SetupFlow({
     );
     const plan: PlannedProposal[] = [];
     if (fix) {
+      // The role and the contract account are in Details; people read what it does.
       plan.push({
         key: "role",
-        title:
-          fix.label === "add_member_to_role"
-            ? `Add Earmark to the ${fix.role} role`
-            : "Add an Earmark role",
+        title: "Let Earmark send big payments to a vote",
         lines: [
-          `Lets ${CONTRACT} file a DAO vote for payments above ${m(envelope.one_approver_limit)}.`,
-          fix.label === "add_member_to_role"
-            ? `It joins ${fix.role}; it can file proposals but not vote.`
-            : "The new role can only file transfer proposals; it can't vote.",
+          `Payments above ${m(envelope.one_approver_limit)} go to your council as a DAO vote. Earmark can ask, but never vote.`,
         ],
         label: fix.label,
         proposal: {
@@ -184,7 +196,15 @@ export function SetupFlow({
         },
       });
     }
-    const kind = createEnvelopeKind(CONTRACT, envelope);
+    // A raise line only when approvers could raise someone above today's limit.
+    const raisable = envelope.spenders.some(
+      (s) => BigInt(s.auto_limit) < BigInt(envelope.raise_ceiling),
+    );
+    const [first] = envelope.spenders;
+    const whoPays =
+      envelope.spenders.length === 1 && first
+        ? `${shortName(first.account_id)} pays up to ${m(first.auto_limit)} at once`
+        : `${envelope.spenders.length} leads pay up to ${m(maxBig(...envelope.spenders.map((s) => BigInt(s.auto_limit))).toString())} at once`;
     plan.push({
       key: "create",
       title: `Create the budget “${envelope.name}”`,
@@ -192,12 +212,11 @@ export function SetupFlow({
         `Leads: ${leads.join("; ")}.`,
         `Up to ${m(envelope.one_approver_limit)} needs one approval from ${names(envelope.approvers)}; more goes to a DAO vote.`,
         `Pays only ${names(envelope.payees)}.`,
-        `Up to ${m(envelope.period_cap)} per ${period}. Approvers can raise a lead to ${m(envelope.raise_ceiling)} after a waiting period.`,
-        `The DAO attaches ${nearAmount(kind.FunctionCall.actions[0]?.deposit ?? "0")} for storage; the rest is refunded.`,
+        `Up to ${m(envelope.period_cap)} per ${period}.${raisable ? ` Approvers can raise a lead to ${m(envelope.raise_ceiling)} after a waiting period.` : ""}`,
       ],
       label: "call",
       proposal: {
-        description: `* Title: Create Earmark budget "${envelope.name}" <br>* Notes: ${envelope.spenders.length} lead(s) pay up to ${m(envelope.spenders[0]?.auto_limit ?? "0")} at once; up to ${m(envelope.one_approver_limit)} with one approval; above that, a DAO vote`,
+        description: `* Title: Create Earmark budget "${envelope.name}" <br>* Notes: ${whoPays}; up to ${m(envelope.one_approver_limit)} with one approval; above that, a DAO vote`,
         kind,
       },
       decoded: { envelope },
@@ -205,7 +224,7 @@ export function SetupFlow({
     setReview({
       plan,
       amount: envelope.period_cap,
-      later: `Fund it with ${m(envelope.period_cap)}: filed here after the budget is approved, because the transfer has to name the new budget.`,
+      later: `Fund it with ${m(envelope.period_cap)}, after the vote passes.`,
     });
     setChecking(false);
   }
@@ -245,12 +264,11 @@ export function SetupFlow({
               </p>
             ) : (
               <>
-                <p className={escalation?.ok ? "text-emerald-700" : "text-amber-800"}>
+                {/* First budget in this DAO: the plan includes the vote that lets Earmark escalate. */}
+                <p className={escalation?.ok ? "text-emerald-700" : "text-muted"}>
                   {escalation?.ok
                     ? "✓ Earmark can send big payments to a DAO vote."
-                    : fix?.label === "add_member_to_role"
-                      ? `Earmark can't file DAO votes yet, so the plan adds it to ${fix.role}.`
-                      : "Earmark can't file DAO votes yet, so the plan adds a role that can only file payments."}
+                    : "The plan also lets Earmark send big payments to a DAO vote."}
                 </p>
                 {canFile === false && (
                   <p className="text-amber-800">
@@ -298,6 +316,7 @@ export function SetupFlow({
             policy={dao.policy}
             plan={review.plan}
             later={review.later}
+            stop={stop}
             onBack={() => setReview(null)}
             onSent={(sent) => {
               const id = sent.create?.id;

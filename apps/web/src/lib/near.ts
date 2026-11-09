@@ -168,6 +168,26 @@ export type AccountView = { amount: string; code_hash: string; storage_usage: nu
 export const viewAccount = (account: string) =>
   rpcQuery<AccountView>({ request_type: "view_account", finality: "final", account_id: account });
 
+/** NEAR storage price: 1e19 yoctoNEAR per byte. */
+const STORAGE_PRICE = 10n ** 19n;
+/** NEAR an account can spend: its balance minus what its stored bytes lock. */
+export async function freeNear(account: string): Promise<bigint> {
+  const { value } = await viewAccount(account);
+  return BigInt(value.amount) - BigInt(value.storage_usage) * STORAGE_PRICE;
+}
+/** The contract's `STORAGE_RESERVE` (spend.rs): new payments stop below this much free NEAR. */
+export const PAYMENT_RESERVE = 5n * 10n ** 23n;
+/**
+ * NEAR to send the contract so new payments can go through: up to the reserve plus 0.05 NEAR of
+ * headroom, rounded up to 0.01. Zero when it has enough.
+ */
+export async function contractTopUp(): Promise<{ free: bigint; needed: bigint }> {
+  const free = await freeNear(CONTRACT);
+  if (free >= PAYMENT_RESERVE) return { free, needed: 0n };
+  const step = 10n ** 22n;
+  const gap = PAYMENT_RESERVE + 5n * step - free;
+  return { free, needed: ((gap + step - 1n) / step) * step };
+}
 export type AccessKeyView = {
   public_key: string;
   access_key: { permission: "FullAccess" | Record<string, unknown> };
@@ -229,6 +249,27 @@ export type DaoProposal = {
 };
 export const getProposal = (dao: string, id: number) =>
   view<DaoProposal>(dao, "get_proposal", { id });
+
+/** The DAO's newest proposal that funds this budget (a Transfer to the contract naming it). */
+export async function findFunding(
+  dao: string,
+  budgetId: string,
+  scan = 50,
+): Promise<DaoProposal | null> {
+  const last = await view<number>(dao, "get_last_proposal_id");
+  const from = Math.max(0, last - scan);
+  const page = await view<DaoProposal[]>(dao, "get_proposals", { from_index: from, limit: scan });
+  const funds = page.filter((p) => {
+    const t = (p.kind as { Transfer?: { receiver_id: string; msg?: string | null } }).Transfer;
+    if (t?.receiver_id !== CONTRACT || !t.msg) return false;
+    try {
+      return (JSON.parse(t.msg) as { envelope_id?: string }).envelope_id === budgetId;
+    } catch {
+      return false;
+    }
+  });
+  return funds.sort((a, b) => b.id - a.id)[0] ?? null;
+}
 
 export type EarmarkEvent = {
   event: string;

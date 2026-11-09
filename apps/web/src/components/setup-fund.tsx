@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CONTRACT, proposalUrl, txUrl } from "@/lib/config";
+import { CONTRACT, proposalUrl } from "@/lib/config";
 import {
   canPropose,
   type EnvelopeInput,
@@ -11,17 +11,22 @@ import {
   type ProposalStatus,
 } from "@/lib/dao";
 import { money, toBase, units } from "@/lib/format";
-import { getProposal, getToken, listBudgets } from "@/lib/near";
+import { findFunding, getProposal, getToken, listBudgets } from "@/lib/near";
 import type { Budget, TokenMeta } from "@/lib/types";
 import { input } from "./setup-form";
 import { Button, ButtonLink, Card, ExternalLink, Pill, Skeleton } from "./ui";
 import { useWallet } from "./wallet";
+
+/** How often an open vote is re-read while the page is visible. */
+const POLL_MS = 10_000;
 
 type Loaded = {
   status: ProposalStatus;
   envelope: EnvelopeInput;
   meta: TokenMeta;
   budget: Budget | null;
+  /** The newest funding vote for this budget, if any. */
+  funding: { id: number; status: ProposalStatus } | null;
   bond: string;
   canFund: boolean | null;
 };
@@ -41,11 +46,9 @@ export function SetupFund({
   const [error, setError] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<{ id: number; hash: string } | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setError(null);
     try {
       const [p, policy] = await Promise.all([getProposal(dao, proposalId), getPolicy(dao)]);
       const fc = (
@@ -55,6 +58,7 @@ export function SetupFund({
       ).FunctionCall;
       const action = fc?.actions[0];
       if (fc?.receiver_id !== CONTRACT || action?.method_name !== "create_envelope") {
+        setData(null);
         setError(`Proposal #${proposalId} doesn’t create an Earmark budget.`);
         return;
       }
@@ -67,11 +71,14 @@ export function SetupFund({
               .filter((b) => b.name === envelope.name && b.token_id === envelope.token_id)
               .sort((a, b) => Number(b.id) - Number(a.id))[0] ?? null)
           : null;
+      const f = budget ? await findFunding(dao, budget.id).catch(() => null) : null;
+      setError(null);
       setData({
         status: p.status as ProposalStatus,
         envelope,
         meta,
         budget,
+        funding: f ? { id: f.id, status: f.status as ProposalStatus } : null,
         bond: policy.proposal_bond,
         canFund: accountId ? canPropose(policy, accountId, "transfer") : null,
       });
@@ -85,11 +92,42 @@ export function SetupFund({
     load();
   }, [load]);
 
-  if (error) return <Card className="p-5 text-rose-700">{error}</Card>;
+  const funded = !!data?.budget && (data.funding?.status === "Approved" || hasMoney(data.budget));
+  const waiting =
+    !!data &&
+    (data.status === "InProgress" ||
+      (data.status === "Approved" && !data.budget) ||
+      (!funded && data.funding?.status === "InProgress"));
+
+  // Re-read while a vote is open, only while the tab is visible.
+  useEffect(() => {
+    if (!waiting) return;
+    const tick = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    const t = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [waiting, load]);
+
+  // A failed read keeps what was shown; with nothing shown yet, offer a retry.
+  if (error && !data)
+    return (
+      <Card className="space-y-3 p-5">
+        <p className="text-rose-700">{error}</p>
+        <Button variant="secondary" onClick={load}>
+          Try again
+        </Button>
+      </Card>
+    );
   if (!data) return <Skeleton className="h-40" />;
 
-  const { status, envelope, meta, budget } = data;
+  const { status, envelope, meta, budget, funding } = data;
   const base = toBase(amount, meta);
+  const fundingOpen = !funded && funding?.status === "InProgress";
 
   async function fund() {
     if (!budget || !base) return;
@@ -105,9 +143,21 @@ export function SetupFund({
       { receiverId: dao, gasTgas: 50, deposit: data?.bond ?? "0" },
     );
     setBusy(false);
-    if (r.ok) setSent({ id: Number(r.value), hash: r.hash });
-    else setSendError(r.error);
+    if (r.ok) {
+      setData((d) => d && { ...d, funding: { id: Number(r.value), status: "InProgress" } });
+    } else setSendError(r.error);
   }
+
+  const pill =
+    status === "InProgress"
+      ? { tone: "amber" as const, text: "Council voting" }
+      : status !== "Approved"
+        ? { tone: "red" as const, text: status }
+        : funded
+          ? { tone: "green" as const, text: "Funded" }
+          : fundingOpen
+            ? { tone: "amber" as const, text: "Funding vote" }
+            : { tone: "green" as const, text: "Approved" };
 
   return (
     <Card className="space-y-4 p-5">
@@ -119,21 +169,14 @@ export function SetupFund({
             <ExternalLink href={proposalUrl(dao, proposalId)}>#{proposalId}</ExternalLink>
           </p>
         </div>
-        <Pill tone={status === "Approved" ? "green" : status === "InProgress" ? "amber" : "red"}>
-          {status === "InProgress" ? "Council voting" : status}
-        </Pill>
+        <Pill tone={pill.tone}>{pill.text}</Pill>
       </div>
 
       {status === "InProgress" && (
-        <div className="space-y-3">
-          <p className="text-muted">
-            Once the council approves it, come back here to fund the budget. This page’s link keeps
-            your place.
-          </p>
-          <Button variant="secondary" onClick={load}>
-            Check again
-          </Button>
-        </div>
+        <p className="text-muted">
+          Waiting for your council to approve it. You can close this page and come back; it updates
+          on its own.
+        </p>
       )}
 
       {status !== "InProgress" && status !== "Approved" && (
@@ -141,30 +184,32 @@ export function SetupFund({
       )}
 
       {status === "Approved" && !budget && (
-        <p className="text-muted">Approved, but the budget isn’t showing yet. Check again soon.</p>
+        <p className="text-muted">Approved. The budget appears in a moment.</p>
       )}
 
-      {budget && sent && (
-        <div className="space-y-2">
-          <p>
-            Funding proposal{" "}
-            <ExternalLink href={proposalUrl(dao, sent.id)}>#{sent.id}</ExternalLink> is filed. The
-            money arrives when the council approves it.
-          </p>
-          <p className="flex gap-4 text-sm">
-            <ExternalLink href={txUrl(sent.hash)}>Transaction</ExternalLink>
-            <ButtonLink href={`/budgets/${budget.id}`} variant="secondary">
-              Open budget
-            </ButtonLink>
-          </p>
+      {budget && funded && (
+        <div className="space-y-3">
+          <p className="text-muted">The budget is live with {money(budget.available, meta)}.</p>
+          <ButtonLink href={`/budgets/${budget.id}`}>Open budget</ButtonLink>
         </div>
       )}
 
-      {budget && !sent && (
+      {budget && fundingOpen && funding && (
         <div className="space-y-3">
           <p className="text-muted">
-            The budget is live with {money(budget.balance, meta)}. Ask the DAO to fund it:
+            Funding vote{" "}
+            <ExternalLink href={proposalUrl(dao, funding.id)}>#{funding.id}</ExternalLink> is open.
+            The money arrives when your council approves it.
           </p>
+          <ButtonLink href={`/budgets/${budget.id}`} variant="secondary">
+            Open budget
+          </ButtonLink>
+        </div>
+      )}
+
+      {budget && !funded && !fundingOpen && (
+        <div className="space-y-3">
+          <p className="text-muted">The budget is live. Ask your council to fund it:</p>
           <div className="flex items-center gap-2">
             <input
               className={`${input} tabular sm:w-40`}
@@ -178,7 +223,7 @@ export function SetupFund({
           {sendError && <p className="text-sm text-rose-700">{sendError}</p>}
           {data.canFund === false && (
             <p className="text-sm text-amber-800">
-              {accountId} can’t file transfer proposals in this DAO.
+              {accountId} can’t ask this DAO for payments. Someone in its Requestor role can.
             </p>
           )}
           <div className="flex flex-wrap gap-3">
@@ -197,4 +242,9 @@ export function SetupFund({
       )}
     </Card>
   );
+}
+
+/** Money has reached the budget (some may already be paid out). */
+function hasMoney(b: Budget): boolean {
+  return BigInt(b.balance) > 0n || BigInt(b.spent_total) > 0n;
 }
