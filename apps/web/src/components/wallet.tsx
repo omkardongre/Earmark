@@ -4,6 +4,7 @@ import type { NearConnector, NearWalletBase } from "@hot-labs/near-connect";
 import { useRouter } from "next/navigation";
 import {
   createContext,
+  Fragment,
   type ReactNode,
   useCallback,
   useContext,
@@ -78,6 +79,18 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connector = useRef<NearConnector | null>(null);
   const [accountId, setAccountId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  // Signing out or switching accounts goes home and drops every screen's state, so nothing the
+  // last account saw or typed carries over. Signing in from signed out stays on the page.
+  const previous = useRef<string | null>(null);
+  const [scope, setScope] = useState(0);
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = accountId;
+    if (before && before !== accountId) {
+      setScope((s) => s + 1);
+      router.replace("/");
+    }
+  }, [accountId, router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,7 +166,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   return (
     <WalletContext.Provider value={{ accountId, ready, connect, disconnect, call }}>
-      {children}
+      <Fragment key={scope}>{children}</Fragment>
     </WalletContext.Provider>
   );
 }
