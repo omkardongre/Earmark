@@ -152,7 +152,10 @@ export function PaySheet({
         memo: memo.trim(),
         work_ref: work.trim(),
       },
-      { gasTgas: 200 },
+      // Wallets must hold prepaid gas × the worst-case gas price up front (~0.1 NEAR per
+      // 100 Tgas). A request burns 4–15 Tgas; an escalation reserves 55 Tgas for get_policy and
+      // add_proposal, so 100 Tgas covers every tier (the S3 escalation runs on 100).
+      { gasTgas: 100 },
     );
     setBusy(false);
     forWallet.current = false;

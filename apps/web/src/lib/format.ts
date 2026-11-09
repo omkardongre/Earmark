@@ -90,6 +90,12 @@ export const BLOCKED: Record<BlockReason, string> = {
 /** Contract panic text -> a plain message. */
 export function errorMessage(e: unknown): string {
   const text = e instanceof Error ? e.message : String(e);
+  // Wallets refuse to send when the account can't cover prepaid gas at the worst-case price.
+  const fee = text.match(
+    /Sender (\S+) does not have enough balance [\d.]+ for operation costing ([\d.]+)/,
+  );
+  if (fee)
+    return `${fee[1]} needs about ${Number(fee[2]).toFixed(2)} NEAR to cover network fees (most is refunded). Add NEAR to it and try again.`;
   const code =
     text.match(/Smart contract panicked: ([a-z_]+)/)?.[1] ??
     text.match(/\b([a-z]+(?:_[a-z]+)+)\b/)?.[1];
