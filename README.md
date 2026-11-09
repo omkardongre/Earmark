@@ -129,7 +129,7 @@ Not yet tested, or only partly:
 - **Payouts are public.** Every payee, amount and work link is on-chain. There is no confidential mode.
 - **No audit.** The contract has unit and sandbox tests only.
 - **Trezu-shaped DAOs let a Requestor remove proposals.** In the policy Trezu gives new treasuries, a Requestor can remove pending proposals, including Earmark's escalations. `settle_escalation` then records the escalation as closed and frees the lead's slot.
-- **Testnet only.** Nothing runs on mainnet. There is no proof yet that escalations render in Trezu: Trezu has no testnet, and the planned mainnet run did not happen.
+- **Mainnet is one small run.** `budgets.omkar5.near` holds a 1 USDC budget for the Trezu treasury `earmark.sputnik-dao.near`; its setup and funding votes showed in Trezu as normal requests. An escalated payment in Trezu is not shown yet.
 - **The "Try it" server holds two testnet keys.** Both are function-call keys on the sandbox contract `try.earmark.testnet` only. `try-lead.earmark.testnet` can call only `request_spend`; `try-council.earmark.testnet` can call only `approve` and `expire`. A stolen key can only make allowlisted payments within the sandbox's caps.
 
 ## NEAR pieces used
@@ -183,7 +183,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 | `make web` | Web app on http://localhost:3000, reading the testnet demo |
 | `make web-build` | Production build of the web app |
 | `make deploy` | Build on Cloud Build and deploy to Cloud Run |
-| `make deploy-mainnet MAINNET_DAO=…` | The same for the mainnet app (`earmark-mainnet`) |
+| `make deploy-mainnet` | The same for the mainnet app (`earmark-mainnet`) |
 | `make try-refill` | Top up the "Try it" sandbox |
 | `make try-scenes` | Create the race and paused sandbox budgets (idempotent) |
 | `make try-limits` | Move the sandbox to 5 at once / 50 with one approval (DAO vote, then the 1-day delay) |
@@ -258,12 +258,15 @@ Live, keyless checks of `budgets.earmark.testnet`, the browser version of `make 
 - Code changes only by DAO `UpgradeRemote` votes: the contract deployed itself once, then deleted its key.
 - The DAO is the owner.
 - Balances add up: token held ≥ budgets, balance = available + waiting + paying, paid requests = paid out.
+- Ready for new payments: the contract has at least 0.5 NEAR free for storage. If not, the row (and the Approvals page) says how much NEAR to send it; a lead only sees that payments are paused.
 
 Each row links to NearBlocks and the raw RPC answer (`/verify/rpc/<check>`). The expected DAO and code hash are in [`apps/web/src/lib/config.ts`](apps/web/src/lib/config.ts) (`EXPECTED_DAO`, `EXPECTED_CODE_HASH`; override with `NEXT_PUBLIC_DAO`, `NEXT_PUBLIC_CODE_HASH`). Update them when `lock.ts` installs new code.
 
 ### Set up a budget (`/setup`)
 
-Enter the DAO and fill in one form: name, amount, period, leads and their limits, the one-approval limit, approvers (pre-filled from the DAO's Approver role, else its council) and who can be paid. The app reads `get_policy`, checks every account exists and the limits are consistent, and lists the DAO proposals it will file in plain words (people by name), with the exact `add_proposal` JSON and full accounts under Details. If the contract can't file DAO votes yet, the plan first adds it to the Requestor role (or a new role that can only file transfers). The connected wallet files the proposals. After the council approves the budget, the same page (its URL keeps the place) files the funding transfer. One contract serves one DAO.
+Enter the DAO and fill in one form: name, amount, period, leads and their limits, the one-approval limit, approvers (pre-filled from the DAO's Approver role, else its council) and who can be paid. The app reads `get_policy`, checks every account exists and the limits are consistent, and lists the DAO proposals it will file in plain words (people by name), with the exact `add_proposal` JSON and full accounts under Details. If the contract can't file DAO votes yet, the plan first adds it to the Requestor role (or a new role that can only file transfers). Filing stops if the DAO has too little free NEAR for the budget's storage deposit (0.1 NEAR) plus proposal storage; a new Trezu treasury has ~0.07 NEAR free. The connected wallet files the proposals. After the council approves the budget, the same page (its URL keeps the place, and it re-reads open votes every 10 s while visible) files the funding transfer once; it finds an open or passed funding vote for the budget, so it isn't filed twice. One contract serves one DAO.
+
+Signing out or switching accounts returns to the home page and resets every screen.
 
 ### Try it (no wallet)
 
@@ -309,7 +312,7 @@ In [`scripts/testnet`](scripts/testnet):
 - Cloud Run service `earmark` in project `earmark-near-2026` (`us-central1`). Max 1 instance, scale to zero.
 - Image from [`apps/web/Dockerfile`](apps/web/Dockerfile) (Next.js standalone output, Node 24, non-root), built by Cloud Build ([`apps/web/cloudbuild.yaml`](apps/web/cloudbuild.yaml)). The upload follows [`.gcloudignore`](.gcloudignore), so no `.env` file leaves the machine.
 - The two sandbox keys are Secret Manager secrets `try-lead-key` and `try-council-key`, readable only by the service account `earmark-web`.
-- Mainnet: a second service `earmark-mainnet` from its own image, since `NEXT_PUBLIC_*` settings are compiled in at build time (`make deploy-mainnet MAINNET_DAO=<treasury>.sputnik-dao.near`, passed as Docker build args). It has no sandbox keys; "Try it" links to the testnet app.
+- Mainnet: a second service `earmark-mainnet` from its own image, since `NEXT_PUBLIC_*` settings are compiled in at build time (`make deploy-mainnet`, passed as Docker build args). It has no sandbox keys; "Try it" links to the testnet app. It reads contract `budgets.omkar5.near` (0 keys, code hash `Gqnu9U…RjFz` from commit `faf4c31`), owned by the Trezu treasury `earmark.sputnik-dao.near`, with native USDC. Fund a new contract account with its storage (≈1 NEAR per 100 kB of wasm) plus 0.5 NEAR, the reserve below which it refuses new payments.
 
 ## License
 

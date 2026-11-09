@@ -62,7 +62,7 @@ deploy:
 
 # Mainnet app: its own image (public settings are compiled in) and service, no "Try it" keys.
 MAINNET_CONTRACT ?= budgets.omkar5.near
-MAINNET_DAO ?=
+MAINNET_DAO ?= earmark.sputnik-dao.near
 MAINNET_CODE_HASH ?= Gqnu9UMKSJYiaZU97iC6cQQwnmxmSvjuUhHDEDnHRjFz
 MAINNET_TAG = mainnet-$(shell git rev-parse --short HEAD)
 deploy-mainnet:

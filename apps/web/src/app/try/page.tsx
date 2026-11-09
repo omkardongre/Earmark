@@ -1,6 +1,6 @@
+import { redirect } from "next/navigation";
 import { TryPanel } from "@/components/try-panel";
 import { Card, Disclosure, Empty, ExternalLink } from "@/components/ui";
-import { redirect } from "next/navigation";
 import { accountUrl, NETWORK, TRY_URL } from "@/lib/config";
 import { units } from "@/lib/format";
 import { amounts, getTryBudget, TRY, tryEnabled } from "@/lib/try";
