@@ -1,8 +1,10 @@
 import { Inbox, type InboxBudget } from "@/components/inbox";
 import { describeChange } from "@/lib/activity";
+import { CONTRACT } from "@/lib/config";
 import { loadBase, loadDecisions, loadPauses, loadRequests } from "@/lib/data";
 import { money } from "@/lib/format";
-import { getRequest, isEligible, listQueued } from "@/lib/near";
+import { contractTopUp, getRequest, isEligible, listQueued } from "@/lib/near";
+import { nearAmount } from "@/lib/token";
 
 export const dynamic = "force-dynamic";
 
@@ -26,10 +28,11 @@ export default async function ApprovalsPage() {
       ...b.spenders.filter(([, l]) => l.paused).map(([a]) => `${b.id}|${a}`),
     ]),
   );
-  const [queued, pauses, decisions] = await Promise.all([
+  const [queued, pauses, decisions, topUp] = await Promise.all([
     listQueued(),
     loadPauses(pausedKeys),
     loadDecisions(),
+    contractTopUp().catch(() => null),
   ]);
   const spenders = [...new Set(open.flatMap((b) => b.spenders.map(([a]) => a)))];
   const eligible = new Map(
@@ -116,6 +119,13 @@ export default async function ApprovalsPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold tracking-tight">Approvals</h1>
+      {topUp && topUp.needed > 0n && (
+        <p className="rounded-xl bg-amber-50 px-4 py-3 text-amber-900">
+          New payments are paused: the contract is low on NEAR for storage. Send{" "}
+          <span className="font-semibold">{nearAmount(topUp.needed.toString())}</span> to{" "}
+          <span className="font-mono text-sm">{CONTRACT}</span> from any account.
+        </p>
+      )}
       <Inbox budgets={data} delaySecs={Number(config.loosen_delay_secs)} />
     </div>
   );

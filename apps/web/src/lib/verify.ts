@@ -11,12 +11,22 @@ import {
   txUrl,
 } from "./config";
 import { money } from "./format";
-import { accessKeyList, getToken, type Read, txApiRead, viewAccount, viewRead } from "./near";
+import {
+  accessKeyList,
+  contractTopUp,
+  getToken,
+  PAYMENT_RESERVE,
+  type Read,
+  txApiRead,
+  viewAccount,
+  viewRead,
+} from "./near";
+import { nearAmount } from "./token";
 import type { Budget, Config, SpendRequest } from "./types";
 
 export type Evidence = { label: string; href: string };
 export type CheckRow = {
-  id: "keys" | "code" | "upgrades" | "owner" | "balances";
+  id: "keys" | "code" | "upgrades" | "owner" | "balances" | "reserve";
   title: string;
   ok: boolean;
   detail: string;
@@ -291,7 +301,25 @@ export async function runVerify(): Promise<VerifyReport> {
     };
   });
 
-  const checks = await Promise.all([keys, code, upgrades, owner, balances]);
+  // The contract refuses new payments below its storage reserve; anyone can send the NEAR.
+  const reserve = guard({ id: "reserve", title: "Ready for new payments" }, async () => {
+    const { free, needed } = await contractTopUp();
+    const cents = 10n ** 22n;
+    const shown = nearAmount((((free > 0n ? free : 0n) / cents) * cents).toString());
+    const floor = nearAmount(PAYMENT_RESERVE.toString());
+    return {
+      ok: needed === 0n,
+      detail:
+        needed === 0n
+          ? `The contract has ${shown} free for storage. It keeps at least ${floor}.`
+          : `New payments are paused: the contract has ${shown} free, under the ${floor} it keeps for storage. Send ${nearAmount(needed.toString())} to ${CONTRACT} from any account.`,
+      evidence: [
+        { label: "Contract on NearBlocks", href: accountUrl(CONTRACT) },
+        rpcLink("reserve"),
+      ],
+    };
+  });
+  const checks = await Promise.all([keys, code, upgrades, owner, balances, reserve]);
   return { contract: CONTRACT, checks, checkedAt: Date.now(), staleFrom };
 }
 

@@ -26,6 +26,8 @@ async function queries(check: string): Promise<object[] | null> {
       ];
     case "owner":
       return [call(CONTRACT, "get_config")];
+    case "reserve":
+      return [{ request_type: "view_account", finality: "final", account_id: CONTRACT }];
     case "upgrades": {
       const dao = await getConfig()
         .then((c) => c.dao_id)

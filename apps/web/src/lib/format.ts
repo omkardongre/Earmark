@@ -83,7 +83,8 @@ export const BLOCKED: Record<BlockReason, string> = {
   too_many_pending: "Too many payments are waiting for approval.",
   invalid_input: "Check the amount and the work link.",
   too_many_requests: "You made the most payments allowed this period.",
-  insufficient_storage_float: "The contract needs a NEAR top-up before new payments.",
+  insufficient_storage_float:
+    "Payments are paused for now: the contract is low on NEAR. Your council can top it up.",
 };
 
 /** Contract panic text -> a plain message. */
