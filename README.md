@@ -110,6 +110,7 @@ Each row names the test that checks it. Tests are in [`contracts/earmark/src/tes
 | A failed payout keeps the DAO's money held for the request; a retry pays it | tests.rs::dao_money_for_an_escalation_is_paid_out_once, sandbox.rs::dao_vote_pays_through_earmark |
 | Deleting a proposal after it paid frees nothing: the work stays claimed | tests.rs::dao_money_for_an_escalation_is_paid_out_once, sandbox.rs::dao_vote_pays_through_earmark |
 | Approved but the money never reached Earmark: closed only 20 blocks after the vote | tests.rs::dao_money_for_an_escalation_is_paid_out_once |
+| Delete only when every budget is closed and empty; the DAO gets the NEAR | tests.rs::contract_cannot_be_deleted_while_a_budget_is_open, sandbox.rs::payout_to_unregistered_payee_fails_and_releases_reservation |
 | An escalation approved before an upgrade settles exactly once after it | tests.rs::escalation_from_before_the_upgrade_settles_once_after_it |
 | Request 101 in a period: too_many_requests | tests.rs::request_cap_and_storage_float_block_new_requests |
 | Removing the last approver who isn't that spender: refused | tests.rs::cannot_leave_a_spender_as_their_own_only_approver |
@@ -215,7 +216,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 
 | Who | Methods |
 |---|---|
-| DAO (FunctionCall proposal) | `create_envelope`, `update_envelope` (any rule change), `close_envelope`, `return_escalation` (take back the money held for a payout that keeps failing); `upgrade` (new code, `UpgradeRemote` proposal); funds a budget with a Transfer proposal with `msg` (`ft_transfer_call`) |
+| DAO (FunctionCall proposal) | `create_envelope`, `update_envelope` (any rule change), `close_envelope`, `return_escalation` (take back the money held for a payout that keeps failing), `delete_contract` (retire Earmark: deletes the contract account and sends its NEAR to the DAO); `upgrade` (new code, `UpgradeRemote` proposal); funds a budget with a Transfer proposal with `msg` (`ft_transfer_call`) |
 | Spender (or its agent key) | `request_spend` |
 | Approver | `approve`, `reject`, `override_duplicate`, `approve_payee`, `remove_payee`, `raise_limit`, `lower_limit`, `pause`, `unpause`, `cancel_change` |
 | Anyone | `expire`, `apply_change`, `settle_escalation`, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `get_payee_record`, `eligible`, `list_queued`, `get_change`) |
@@ -226,6 +227,7 @@ Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued
 
 - **DAO votes pay through Earmark (R22).** An escalation is a Transfer proposal that sends the amount to Earmark with `{"request_id": …}`. Earmark accepts exactly that amount once, while the request is `escalated`, and pays the payee in the same transaction (a Trezu vote leaves enough gas). Only when that transfer succeeds is the request `paid_by_dao` and counted in the records. If the payout fails, the request is `dao_funded` and the money stays held; anyone can retry with `settle_escalation`. A second payment, a wrong amount or a closed request is refunded to the DAO.
 - **Escalations settle.** `settle_escalation` reads the DAO proposal while a request is `escalated`: rejected, removed, expired or moved → `escalation_closed`. Approved but the money never arrived (20 blocks, about 11 s, after the vote) → `escalation_closed` (`dao_payment_returned`). A proposal filed before R22, which paid the payee directly, → `paid_by_dao` once it has stayed approved for 20 blocks (Sputnik turns it `Failed` if its transfer fails). Each outcome frees the lead's DAO-vote slot (max 5 open). The payment page has a "Check the DAO result" button, and "Try the payout again" for `dao_funded`. **Installed on testnet** (10 Nov, reproducible build at `23c86db`, code `2B1Pf…dVFW`, DAO proposals 14 and 15). Checked live: proposal 16 paid Sofia 60 tUSDC through Earmark. The testnet DAO runs older Sputnik code that gives Earmark only ~1.4 Tgas in the vote, so the payout ran in a second step (`settle_escalation`, tx `3pjSD9E1…`); the mainnet DAO's code leaves enough to pay inside the vote (sandbox test). **Mainnet** still runs the code from before R22 until its DAO votes the upgrade.
+- **Retiring Earmark (R23).** `delete_contract` is DAO only. It is refused unless every budget is closed and empty and no DAO vote or held DAO payment is open; it then reads the contract's balance of every allowed token and deletes only if all are zero, since tokens in a deleted account are lost. The NEAR always goes to the DAO.
 - **Request cap.** At most 100 requests per spender per budget period, and no new request while the contract has less than 0.5 NEAR free for storage.
 - **Approvers.** Every spender keeps an approver other than themselves (`no_other_approver`).
 - **Removal.** Removing a spender cancels their waiting changes and blocks approval of their pending requests.

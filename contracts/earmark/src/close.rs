@@ -2,7 +2,7 @@
 
 use near_contract_standards::fungible_token::core::ext_ft_core;
 use near_sdk::json_types::{U64, U128};
-use near_sdk::{Gas, NearToken, PromiseError, PromiseOrValue, env, near};
+use near_sdk::{Gas, NearToken, Promise, PromiseError, PromiseOrValue, env, near, require};
 
 use crate::events::Event;
 use crate::request::RequestStatus;
@@ -81,5 +81,67 @@ impl Contract {
         }
         .emit();
         U128(0)
+    }
+}
+
+/// Gas for each token's `ft_balance_of` and for the check that then deletes the account.
+const GAS_FT_BALANCE: Gas = Gas::from_tgas(5);
+const GAS_ON_DELETE_CHECK: Gas = Gas::from_tgas(10);
+
+#[near]
+impl Contract {
+    /// DAO only, through a `FunctionCall` proposal (R23). Deletes this contract account and
+    /// sends all its NEAR to the DAO, so the storage NEAR comes back when Earmark is retired.
+    /// Refused unless every budget is closed with nothing held, reserved or being paid, and no
+    /// DAO vote or held DAO payment is open. Then it reads the contract's balance of every
+    /// allowed token and deletes only if all are zero, because tokens left in a deleted account
+    /// are lost. The beneficiary is always the DAO: NEAR sent to an account that doesn't exist
+    /// is burned.
+    pub fn delete_contract(&mut self) -> Promise {
+        self.assert_dao();
+        for (_, e) in self.envelopes.iter() {
+            require!(e.closed, "budget_open");
+            require!(
+                e.balance == 0 && e.committed == 0 && e.in_flight == 0,
+                "budget_not_empty"
+            );
+            require!(
+                e.spenders.values().all(|s| s.open_escalations == 0),
+                "dao_payment_open"
+            );
+        }
+        let me = env::current_account_id();
+        let mut tokens = self.token_ids.iter();
+        let first = tokens.next().unwrap_or_else(|| env::panic_str("no_tokens"));
+        let balance = |t: &near_sdk::AccountId| {
+            ext_ft_core::ext(t.clone())
+                .with_static_gas(GAS_FT_BALANCE)
+                .ft_balance_of(me.clone())
+        };
+        tokens.fold(balance(first), |p, t| p.and(balance(t))).then(
+            Self::ext(me.clone())
+                .with_static_gas(GAS_ON_DELETE_CHECK)
+                .on_delete_check(),
+        )
+    }
+
+    /// Deletes the account if every token balance read back as zero; otherwise does nothing.
+    #[private]
+    pub fn on_delete_check(&mut self) -> bool {
+        // A balance is a short JSON string; 64 bytes is plenty and bounds the read.
+        let empty = (0..env::promise_results_count()).all(|i| {
+            env::promise_result_checked(i, 64)
+                .ok()
+                .and_then(|v| near_sdk::serde_json::from_slice::<U128>(&v).ok())
+                .is_some_and(|b| b.0 == 0)
+        });
+        if !empty {
+            near_sdk::log!("delete refused: tokens_left");
+            return false;
+        }
+        Promise::new(env::current_account_id())
+            .delete_account(self.dao_id.clone())
+            .detach();
+        true
     }
 }

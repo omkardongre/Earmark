@@ -313,6 +313,31 @@ async fn payout_to_unregistered_payee_fails_and_releases_reservation() -> TestRe
     )
     .await?;
     assert_eq!(dao_balance, "995", "1000 minted, 100 funded, 95 returned");
+
+    // R23: every budget closed and empty, so the DAO can delete the contract and get its NEAR.
+    let dao_near = Tokens::account(w.dao.id.clone())
+        .near_balance()
+        .fetch_from(net)
+        .await?;
+    call(
+        net,
+        &w.dao,
+        &w.earmark.id,
+        "delete_contract",
+        json!({}),
+        NearToken::from_near(0),
+    )
+    .await?;
+    let gone = Account(w.earmark.id.clone()).view().fetch_from(net).await;
+    assert!(gone.is_err(), "contract account should be deleted");
+    let after = Tokens::account(w.dao.id.clone())
+        .near_balance()
+        .fetch_from(net)
+        .await?;
+    assert!(
+        after.total > dao_near.total,
+        "the DAO received the contract's NEAR"
+    );
     Ok(())
 }
 

@@ -933,3 +933,11 @@ fn check_spend_agrees_with_request_spend() {
         );
     }
 }
+
+#[test]
+#[should_panic(expected = "budget_open")]
+fn contract_cannot_be_deleted_while_a_budget_is_open() {
+    let mut c = spending_contract(60);
+    at("club.sputnik-dao.near", 0);
+    let _ = c.delete_contract();
+}
