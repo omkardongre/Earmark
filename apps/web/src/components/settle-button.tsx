@@ -19,10 +19,10 @@ const RESULT: Record<string, string> = {
  */
 export function SettleButton({
   requestId,
-  payout = false,
+  payout,
 }: {
   requestId: string;
-  payout?: boolean;
+  payout?: "first" | "retry";
 }) {
   const { accountId, call } = useWallet();
   const toast = useToast();
@@ -44,7 +44,13 @@ export function SettleButton({
         );
       }}
     >
-      {busy ? "Confirm in wallet…" : payout ? "Try the payout again" : "Check the DAO result"}
+      {busy
+        ? "Confirm in wallet…"
+        : payout === "retry"
+          ? "Try the payout again"
+          : payout
+            ? "Pay it out"
+            : "Check the DAO result"}
     </Button>
   );
 }

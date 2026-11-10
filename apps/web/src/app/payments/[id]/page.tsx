@@ -75,7 +75,9 @@ export default async function PaymentPage({
           {r.status === "escalated" && r.dao_proposal_id !== null && (
             <SettleButton requestId={id} />
           )}
-          {r.status === "dao_funded" && <SettleButton requestId={id} payout />}
+          {r.status === "dao_funded" && (
+            <SettleButton requestId={id} payout={r.failure ? "retry" : "first"} />
+          )}
         </div>
 
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-line pt-5">
@@ -170,7 +172,7 @@ function nextStep(r: SpendRequest, expiresNs: string, ttlSecs: number): string |
     case "dao_funded":
       return r.failure
         ? "The DAO approved and sent the money, but paying it out didn’t go through. The money is held here. Try again once the payee can receive this token."
-        : "The DAO approved and sent the money. Paying it out…";
+        : "The DAO approved and sent the money. One more step pays it out; anyone can do it.";
     case "paying":
       return "Sending the money…";
     default:
