@@ -1,8 +1,10 @@
 # Earmark
 
-> Earmark gives teams in a Sputnik DAO (including Trezu-made treasuries) their own budgets, enforced by a NEAR contract with no keys. Small payouts go out at once, medium ones need one approver, large ones become a DAO proposal; payouts go only to approved payees, funds are reserved at request, and the same work can't be paid twice. Track: Social Money (`social`). Testnet only.
+> Earmark gives teams in a Sputnik DAO (including Trezu-made treasuries) their own budgets, enforced by a NEAR contract with no keys. Small payouts go out at once, medium ones need one approver, large ones become a DAO proposal; payouts go only to approved payees, funds are reserved at request, and the same work can't be paid twice. Track: Social Money (`social`). Testnet demo plus a small mainnet run on a Trezu treasury.
 
 Hosted app (testnet): https://earmark-878141445235.us-central1.run.app. Contract: `budgets.earmark.testnet`. DAO: `community-news.sputnikv2.testnet`. "Try it" sandbox contract: `try.earmark.testnet`. Commands run from the repository root after `make install`. The live code hash is on the Verify page and printed by `make verify`.
+
+Mainnet (9 Nov, native USDC, tiny amounts): app https://earmark-mainnet-878141445235.us-central1.run.app, contract `budgets.omkar5.near` (0 keys), public Trezu treasury `earmark.sputnik-dao.near`. Paid at once, one approval and a DAO vote all worked; the DAO vote showed in Trezu as a Payment Request (proposal #3) and settled as paid by the DAO.
 
 ## Entry points
 
@@ -27,7 +29,7 @@ Hosted app (testnet): https://earmark-878141445235.us-central1.run.app. Contract
 - [The deployed code is the published build](https://earmark-878141445235.us-central1.run.app/verify): code hash matches the recorded reproducible build; `contract_source_metadata` names the commit; also `make verify`
 - [Balances add up](https://earmark-878141445235.us-central1.run.app/verify): balance = available + waiting + paying, paid requests = paid out; also `make verify`
 - [check_spend matches request_spend](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `check_spend_agrees_with_request_spend` (15 states × 8 amounts)
-- [Escalations settle from the DAO result](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `settle_escalation_records_each_dao_outcome`, `escalation_from_before_the_upgrade_settles_once_after_it`
+- [Escalations settle from the DAO result](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `settle_escalation_records_each_dao_outcome`, `escalation_from_before_the_upgrade_settles_once_after_it`; "Paid by DAO" only after Earmark's own transfer: `dao_money_for_an_escalation_is_paid_out_once`, sandbox `dao_vote_pays_through_earmark` (real Sputnik code)
 - [Funds are reserved at request](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `second_request_cannot_spend_a_reservation`; live race scene on /try
 - [Same work can't be paid twice](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `escalation_reserves_nothing_and_blocks_duplicate_work`, `override_allows_one_repeat_of_the_same_work`; `duplicate_work` step in `make demo`
 - [Failed payout releases the reservation](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/tests/sandbox.rs): `payout_to_unregistered_payee_fails_and_releases_reservation`

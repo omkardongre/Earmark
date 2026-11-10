@@ -72,7 +72,7 @@ Limits attach to the lead, not the payee, because one person can open many accou
 |---|---|---|
 | Each payout | One Transfer proposal and a council vote | One vote funds a budget; small payouts need no vote |
 | Medium payouts | Full vote | One approver who is not the lead |
-| Large payouts | Transfer proposal | Same: Earmark files the Transfer proposal (as a Requestor) and records the result |
+| Large payouts | Transfer proposal | Earmark files one Transfer proposal (as a Requestor) that sends the money to Earmark; Earmark pays the payee and says "Paid by DAO" only after its own transfer succeeds |
 | Who can be paid | Anyone the proposal names | Approved payees only; new payees wait out a delay |
 | Overspending | Each proposal checked alone | Funds reserved at request; per-period cap per lead |
 | Same work paid twice | Council must notice | Refused (`duplicate_work`) unless an approver overrides once |
@@ -80,11 +80,11 @@ Limits attach to the lead, not the payee, because one person can open many accou
 | Rule changes | A vote each | Tightening applies at once; loosening waits and can be cancelled |
 | Code changes | n/a | Only by a DAO `UpgradeRemote` vote; the contract has 0 keys |
 
-Sputnik pieces used: `FunctionCall` proposals (create, update, close a budget), Transfer with `msg` (fund a budget through `ft_transfer_call`), Transfer (escalation), `UpgradeRemote` (new code), the Requestor role, `get_policy` and `get_proposal`.
+Sputnik pieces used: `FunctionCall` proposals (create, update, close a budget), Transfer with `msg` (fund a budget, and send an approved escalation's money to Earmark, both through `ft_transfer_call`), `UpgradeRemote` (new code), the Requestor role, `get_policy` and `get_proposal`.
 
 ## Invariants
 
-Each row names the test that checks it. Tests are in [`contracts/earmark/src/tests.rs`](contracts/earmark/src/tests.rs) (`make test`) and [`contracts/earmark/tests/sandbox.rs`](contracts/earmark/tests/sandbox.rs) (`make test-sandbox`).
+Each row names the test that checks it. Tests are in [`contracts/earmark/src/tests.rs`](contracts/earmark/src/tests.rs) (`make test`) and [`contracts/earmark/tests/sandbox.rs`](contracts/earmark/tests/sandbox.rs) (`make test-sandbox`). The sandbox DAO test runs the exact Sputnik code of the mainnet treasury (`tests/res/sputnikdao2.wasm`, code hash `DtHZA1mU…hJXuF`, read with RPC `view_code`).
 
 | Invariant | Test |
 |---|---|
@@ -106,6 +106,10 @@ Each row names the test that checks it. Tests are in [`contracts/earmark/src/tes
 | Payee approved but still in its delay: payee_pending | tests.rs::added_payee_waits_out_the_delay_and_removal_is_instant, tests.rs::check_spend_agrees_with_request_spend |
 | check_spend and request_spend agree (15 states x 8 amounts; unknown budget id is `closed` in the view, `unknown_envelope` in the call) | tests.rs::check_spend_agrees_with_request_spend |
 | Settling an escalation: rejected/expired/removed frees the slot and claim; approved gives PaidByDao and keeps the claim; twice changes nothing | tests.rs::settle_escalation_records_each_dao_outcome |
+| "Paid by DAO" only after Earmark's own transfer to the payee succeeds; the DAO's money is accepted once, at the exact amount | tests.rs::dao_money_for_an_escalation_is_paid_out_once, sandbox.rs::dao_vote_pays_through_earmark |
+| A failed payout keeps the DAO's money held for the request; a retry pays it | tests.rs::dao_money_for_an_escalation_is_paid_out_once, sandbox.rs::dao_vote_pays_through_earmark |
+| Deleting a proposal after it paid frees nothing: the work stays claimed | tests.rs::dao_money_for_an_escalation_is_paid_out_once, sandbox.rs::dao_vote_pays_through_earmark |
+| Approved but the money never reached Earmark: closed only 20 blocks after the vote | tests.rs::dao_money_for_an_escalation_is_paid_out_once |
 | An escalation approved before an upgrade settles exactly once after it | tests.rs::escalation_from_before_the_upgrade_settles_once_after_it |
 | Request 101 in a period: too_many_requests | tests.rs::request_cap_and_storage_float_block_new_requests |
 | Removing the last approver who isn't that spender: refused | tests.rs::cannot_leave_a_spender_as_their_own_only_approver |
@@ -128,8 +132,9 @@ Not yet tested, or only partly:
 - **A lead and an approver who collude are not stopped.** They can pay an approved payee up to the one-approval limit and the period cap. Payee allowlists, caps and public records limit the damage; they don't prevent it.
 - **Payouts are public.** Every payee, amount and work link is on-chain. There is no confidential mode.
 - **No audit.** The contract has unit and sandbox tests only.
-- **Trezu-shaped DAOs let a Requestor remove proposals.** In the policy Trezu gives new treasuries, a Requestor can remove pending proposals, including Earmark's escalations. `settle_escalation` then records the escalation as closed and frees the lead's slot.
-- **Mainnet is one small run.** `budgets.omkar5.near` holds a 1 USDC budget for the Trezu treasury `earmark.sputnik-dao.near`; its setup and funding votes showed in Trezu as normal requests. An escalated payment in Trezu is not shown yet.
+- **Trezu-shaped DAOs let a Requestor remove proposals.** In the policy Trezu gives new treasuries, a Requestor can remove pending proposals, including Earmark's escalations. `settle_escalation` then records the escalation as closed and frees the lead's slot. Removing a proposal after the DAO's money arrived changes nothing: the request is no longer `escalated`, so its work stays claimed.
+- **DAO payouts need the payee registered with the token.** If not, Earmark keeps the DAO's money for that request (`dao_funded`) until a retry pays it, or the DAO takes it back with `return_escalation`.
+- **Mainnet is one small run.** `budgets.omkar5.near` holds a 1 USDC budget for the Trezu treasury `earmark.sputnik-dao.near`; its setup, funding and DAO-vote payment all showed in Trezu as normal requests. Amounts are tiny (1 USDC budget).
 - **The "Try it" server holds two testnet keys.** Both are function-call keys on the sandbox contract `try.earmark.testnet` only. `try-lead.earmark.testnet` can call only `request_spend`; `try-council.earmark.testnet` can call only `approve` and `expire`. A stolen key can only make allowlisted payments within the sandbox's caps.
 
 ## NEAR pieces used
@@ -158,11 +163,17 @@ Working on testnet:
 - Contract `budgets.earmark.testnet` with the demo budget, and the sandbox contract `try.earmark.testnet` for "Try it".
 - The hosted app, the replay, the Verify page, `make verify` and `make demo`.
 
+Working on mainnet (small run, 9 Nov, native USDC):
+
+- Contract `budgets.omkar5.near` (0 keys), owned by the public Trezu treasury `earmark.sputnik-dao.near`; app at https://earmark-mainnet-878141445235.us-central1.run.app.
+- `/setup` filed the setup and funding votes; Trezu showed them as normal requests and they were approved there.
+- All three payment paths with a real wallet: 0.1 USDC paid at once, 0.4 USDC after one approval, and 0.6 USDC sent to a DAO vote. The vote showed in Trezu as a "Payment Request · 0.6 USDC", was approved there, and "Check the DAO result" recorded it as paid by the DAO.
+
 Not done:
 
-- Mainnet deployment and a Trezu rendering check.
+- Confidential (NEAR Business / NEAR Intents) treasuries: not tried. Mainnet used a public Trezu treasury.
 - Audit.
-- Wallet tests of the newest flows (payee registration, add payee, `/setup` filing).
+- Wallet tests of payee registration and add payee.
 - No live customer yet.
 
 ---
@@ -204,7 +215,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 
 | Who | Methods |
 |---|---|
-| DAO (FunctionCall proposal) | `create_envelope`, `update_envelope` (any rule change), `close_envelope`; `upgrade` (new code, `UpgradeRemote` proposal); funds a budget with a Transfer proposal with `msg` (`ft_transfer_call`) |
+| DAO (FunctionCall proposal) | `create_envelope`, `update_envelope` (any rule change), `close_envelope`, `return_escalation` (take back the money held for a payout that keeps failing); `upgrade` (new code, `UpgradeRemote` proposal); funds a budget with a Transfer proposal with `msg` (`ft_transfer_call`) |
 | Spender (or its agent key) | `request_spend` |
 | Approver | `approve`, `reject`, `override_duplicate`, `approve_payee`, `remove_payee`, `raise_limit`, `lower_limit`, `pause`, `unpause`, `cancel_change` |
 | Anyone | `expire`, `apply_change`, `settle_escalation`, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `get_payee_record`, `eligible`, `list_queued`, `get_change`) |
@@ -213,12 +224,13 @@ Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued
 
 ### Safety limits
 
-- **Escalations settle.** `settle_escalation` reads the DAO proposal and records the result: approved → `paid_by_dao`; rejected, removed, expired or moved → `escalation_closed`. Both free the lead's DAO-vote slot (max 5 open). The payment page has a "Check the DAO result" button for this.
+- **DAO votes pay through Earmark (R22).** An escalation is a Transfer proposal that sends the amount to Earmark with `{"request_id": …}`. Earmark accepts exactly that amount once, while the request is `escalated`, and pays the payee in the same transaction (a Trezu vote leaves enough gas). Only when that transfer succeeds is the request `paid_by_dao` and counted in the records. If the payout fails, the request is `dao_funded` and the money stays held; anyone can retry with `settle_escalation`. A second payment, a wrong amount or a closed request is refunded to the DAO.
+- **Escalations settle.** `settle_escalation` reads the DAO proposal while a request is `escalated`: rejected, removed, expired or moved → `escalation_closed`. Approved but the money never arrived (20 blocks, about 11 s, after the vote) → `escalation_closed` (`dao_payment_returned`). A proposal filed before R22, which paid the payee directly, → `paid_by_dao` once it has stayed approved for 20 blocks (Sputnik turns it `Failed` if its transfer fails). Each outcome frees the lead's DAO-vote slot (max 5 open). The payment page has a "Check the DAO result" button, and "Try the payout again" for `dao_funded`. **Not installed yet:** the live testnet and mainnet contracts run the code from before R22 until their DAOs vote the upgrade.
 - **Request cap.** At most 100 requests per spender per budget period, and no new request while the contract has less than 0.5 NEAR free for storage.
 - **Approvers.** Every spender keeps an approver other than themselves (`no_other_approver`).
 - **Removal.** Removing a spender cancels their waiting changes and blocks approval of their pending requests.
 - **Payee record.** `get_payee_record` counts confirmed payments to each payee, across budgets.
-- **Escalation text.** DAO proposals use the format Trezu reads: `* Title: Earmark request <id> <br>* Notes: <memo> · by <spender> · budget <n> <br>* Url: <work link>`.
+- **Escalation text.** DAO proposals use the format Trezu reads. The title names the real payee, since the proposal's recipient is Earmark: `* Title: Pay <payee> through Earmark <br>* Notes: <memo> · by <spender> · budget <n> · request <id> <br>* Url: <work link>`.
 - **Upgrades.** `migrate` converts the state layout from before these limits, so the live contract can be upgraded through a DAO vote.
 
 ### Testnet demo
