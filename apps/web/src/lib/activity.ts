@@ -144,7 +144,10 @@ export function activityFeed(
         break;
       case "spend_paid":
         row = {
-          text: `${req ? shortName(req.spender) : "The budget"} paid ${name("payee")}`,
+          text:
+            req?.tier === "escalate"
+              ? `The DAO paid ${name("payee")}`
+              : `${req ? shortName(req.spender) : "The budget"} paid ${name("payee")}`,
           amount: amount(str("amount")),
           chip: { label: "Paid", tone: "green" },
         };
@@ -181,15 +184,29 @@ export function activityFeed(
         row =
           str("outcome") === "approved"
             ? {
-                text: `The DAO voted yes and paid ${payee}`,
+                text: `The DAO voted yes to pay ${payee}`,
                 amount: amount(),
-                chip: { label: "Paid by DAO", tone: "green" },
+                chip: { label: "DAO approved", tone: "blue" },
               }
             : {
-                text: `The DAO vote on paying ${payee} closed (${str("outcome")})`,
+                text: `The DAO vote on paying ${payee} closed (${str("outcome").replaceAll("_", " ")})`,
                 amount: amount(),
                 chip: { label: "Not paid", tone: "gray" },
               };
+        break;
+      case "dao_payout_failed":
+        row = {
+          text: `Paying ${payee} didn’t go through yet; the DAO’s money is held for a retry`,
+          amount: amount(),
+          chip: { label: "Retry", tone: "amber" },
+        };
+        break;
+      case "dao_funds_returned":
+        row = {
+          text: `The money for ${payee} went back to the DAO`,
+          amount: amount(str("amount")),
+          chip: { label: "Returned", tone: "gray" },
+        };
         break;
       case "change_queued":
         people.push(...changeAccounts(change));

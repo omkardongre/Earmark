@@ -6,16 +6,24 @@ import { Button } from "./ui";
 import { useWallet } from "./wallet";
 
 const RESULT: Record<string, string> = {
-  paid_by_dao: "The DAO paid it.",
+  paid_by_dao: "Paid.",
   escalation_closed: "The DAO vote closed without paying.",
   escalated: "The vote is still open.",
+  dao_funded: "Not paid yet. The money is still held; try again later.",
 };
 
 /**
- * R18: anyone can record the DAO's decision on an escalated payment. The contract reads the
- * proposal itself, so this only frees the lead's DAO-vote slot; it can't change the outcome.
+ * R18, R22: anyone can call `settle_escalation`. On an open vote it records the DAO's decision;
+ * once the DAO's money is held (`payout`), it pays the payee. The contract reads the proposal
+ * itself and only ever pays the listed payee, so the caller can't change the outcome.
  */
-export function SettleButton({ requestId }: { requestId: string }) {
+export function SettleButton({
+  requestId,
+  payout = false,
+}: {
+  requestId: string;
+  payout?: boolean;
+}) {
   const { accountId, call } = useWallet();
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -36,7 +44,7 @@ export function SettleButton({ requestId }: { requestId: string }) {
         );
       }}
     >
-      {busy ? "Confirm in wallet…" : "Check the DAO result"}
+      {busy ? "Confirm in wallet…" : payout ? "Try the payout again" : "Check the DAO result"}
     </Button>
   );
 }

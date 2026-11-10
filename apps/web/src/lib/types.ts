@@ -27,7 +27,8 @@ export type RequestStatus =
   | "rejected"
   | "expired"
   | "paid_by_dao"
-  | "escalation_closed";
+  | "escalation_closed"
+  | "dao_funded";
 
 export type SpenderLimits = {
   auto_limit: string;

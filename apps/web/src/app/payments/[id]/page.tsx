@@ -75,6 +75,7 @@ export default async function PaymentPage({
           {r.status === "escalated" && r.dao_proposal_id !== null && (
             <SettleButton requestId={id} />
           )}
+          {r.status === "dao_funded" && <SettleButton requestId={id} payout />}
         </div>
 
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 border-t border-line pt-5">
@@ -165,7 +166,11 @@ function nextStep(r: SpendRequest, expiresNs: string, ttlSecs: number): string |
     case "escalating":
       return "Creating the DAO proposal…";
     case "escalated":
-      return "Waiting for the DAO vote. It pays out if the proposal passes. After the vote, anyone can record the result.";
+      return "Waiting for the DAO vote. If it passes, the DAO sends the money and Earmark pays it out.";
+    case "dao_funded":
+      return r.failure
+        ? "The DAO approved and sent the money, but paying it out didn’t go through. The money is held here. Try again once the payee can receive this token."
+        : "The DAO approved and sent the money. Paying it out…";
     case "paying":
       return "Sending the money…";
     default:

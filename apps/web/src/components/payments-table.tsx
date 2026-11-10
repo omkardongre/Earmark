@@ -11,7 +11,13 @@ import { CHANGED } from "./wallet";
 
 const PAGE = 10;
 type Filter = "all" | "waiting" | "paid";
-const WAITING: RequestStatus[] = ["pending_approval", "escalating", "escalated", "paying"];
+const WAITING: RequestStatus[] = [
+  "pending_approval",
+  "escalating",
+  "escalated",
+  "dao_funded",
+  "paying",
+];
 const FILTERS: { key: Filter; label: string; match: (s: RequestStatus) => boolean }[] = [
   { key: "all", label: "All", match: () => true },
   { key: "waiting", label: "Waiting", match: (s) => WAITING.includes(s) },

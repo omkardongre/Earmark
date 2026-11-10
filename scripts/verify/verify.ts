@@ -165,12 +165,18 @@ await guard("budget readable", async () => {
     await guard(`escalated ${id} readable`, async () => {
       const p = await view<{
         description: string;
-        kind: { Transfer?: { receiver_id: string; amount: string } };
+        kind: { Transfer?: { receiver_id: string; amount: string; msg?: string | null } };
       }>(net, fx.dao, "get_proposal", { id: Number(r.dao_proposal_id) });
       const t = p.kind.Transfer;
+      // R22: the DAO sends the money to the contract with the request id, and the contract pays
+      // the payee. Proposals filed before R22 paid the payee directly.
+      const toContract =
+        t?.receiver_id === fx.contract && t.msg === JSON.stringify({ request_id: id });
       check(
         `escalated ${id} is DAO proposal ${r.dao_proposal_id}`,
-        p.description.includes(id) && t?.receiver_id === r.payee && t?.amount === r.amount,
+        p.description.includes(id) &&
+          (toContract || t?.receiver_id === r.payee) &&
+          t?.amount === r.amount,
         `${usdc(r.amount)} to ${r.payee}, ${r.status}`,
       );
     });

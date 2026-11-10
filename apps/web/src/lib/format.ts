@@ -66,6 +66,7 @@ export const STATUS: Record<
   expired: { label: "Expired", tone: "gray" },
   paid_by_dao: { label: "Paid by DAO", tone: "green" },
   escalation_closed: { label: "DAO vote closed", tone: "gray" },
+  dao_funded: { label: "DAO approved", tone: "blue" },
 };
 
 /** Plain-words reason for a blocked payment, with what to do about it. */

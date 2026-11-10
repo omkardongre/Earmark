@@ -270,6 +270,8 @@ export async function runVerify(): Promise<VerifyReport> {
         sum((b) => (BigInt(b.committed) + BigInt(b.in_flight)).toString()),
         sum((b) => b.spent_total),
       ];
+      // R22: DAO money held for an approved DAO vote until it's paid out (not in any budget).
+      let daoHeld = 0n;
       for (const b of mine) {
         if (BigInt(b.balance) !== BigInt(b.available) + BigInt(b.committed) + BigInt(b.in_flight))
           problems.push(`${b.name}: balance isn't available + waiting`);
@@ -280,11 +282,18 @@ export async function runVerify(): Promise<VerifyReport> {
           .filter(([, r]) => r.status === "paid")
           .reduce((s, [, r]) => s + BigInt(r.amount), 0n);
         if (paid !== BigInt(b.spent_total)) problems.push(`${b.name}: paid requests ≠ paid out`);
+        daoHeld += requests
+          .filter(
+            ([, r]) =>
+              r.tier === "escalate" && (r.status === "dao_funded" || r.status === "paying"),
+          )
+          .reduce((s, [, r]) => s + BigInt(r.amount), 0n);
       }
-      if (BigInt(held) < bal)
-        problems.push(`holds ${money(held, meta)}, budgets need ${money(bal, meta)}`);
+      if (BigInt(held) < bal + daoHeld)
+        problems.push(`holds ${money(held, meta)}, budgets need ${money(bal + daoHeld, meta)}`);
+      const daoPart = daoHeld > 0n ? `, ${money(daoHeld, meta)} from DAO votes being paid out` : "";
       sentences.push(
-        `The contract holds ${money(held, meta)}: ${money(avail, meta)} available and ${money(waiting, meta)} waiting for approval. Paid requests add up to the ${money(spent, meta)} paid out.`,
+        `The contract holds ${money(held, meta)}: ${money(avail, meta)} available and ${money(waiting, meta)} waiting for approval${daoPart}. Paid requests add up to the ${money(spent, meta)} paid out.`,
       );
     }
     return {
