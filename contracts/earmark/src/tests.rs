@@ -443,7 +443,8 @@ fn settle_escalation_records_each_dao_outcome() {
     escalate(&mut c, "e4", "series-4", 4);
     assert_eq!(open_escalations(&c), 4);
 
-    // Approved and run by the DAO: counted for spender and payee, work claim kept.
+    // Approved, filed before R22 so it paid the payee directly (no action log to time it):
+    // counted for spender and payee, work claim kept.
     at("earmark.testnet", 10);
     assert_eq!(
         settle(&mut c, "e1", Ok(json!({ "status": "Approved" }))),
@@ -481,6 +482,75 @@ fn settle_escalation_records_each_dao_outcome() {
 
     assert_eq!(open_escalations(&c), 0);
     assert_eq!(c.get_payee_record(account("carol.near")).paid_count, 1);
+}
+
+/// R22: the DAO's money comes to Earmark, which pays the payee and only then says paid.
+#[test]
+fn dao_money_for_an_escalation_is_paid_out_once() {
+    use crate::RequestStatus::{DaoFunded, Escalated, EscalationClosed, PaidByDao, Paying};
+    use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+    use near_sdk::serde_json::json;
+    use near_sdk::{PromiseError, PromiseOrValue};
+    let mut c = spending_contract(60);
+    escalate(&mut c, "e1", "series-1", 1);
+    escalate(&mut c, "e2", "series-2", 2);
+    let msg = |id: &str| json!({ "request_id": id }).to_string();
+    let dao = || account("club.sputnik-dao.near");
+    let status = |c: &Contract, id: &str| c.get_request(id.to_owned()).unwrap().status;
+    let refunded = |r: PromiseOrValue<U128>| match r {
+        PromiseOrValue::Value(U128(v)) => v,
+        PromiseOrValue::Promise(_) => panic!("expected a value"),
+    };
+
+    // Only the exact amount, once. It's paid out in the same call.
+    testing_env!(context("usdc.near", NearToken::from_yoctonear(1)).build());
+    assert_eq!(refunded(c.ft_on_transfer(dao(), U128(299), msg("e1"))), 299);
+    assert_eq!(refunded(c.ft_on_transfer(dao(), U128(300), msg("e1"))), 0);
+    assert_eq!(status(&c, "e1"), Paying);
+    assert_eq!(refunded(c.ft_on_transfer(dao(), U128(300), msg("e1"))), 300);
+
+    // The payout fails: the money stays held and anyone can retry.
+    at("earmark.testnet", 10);
+    assert_eq!(
+        c.on_dao_payout("e1".into(), Err(PromiseError::Failed)),
+        DaoFunded
+    );
+    assert_eq!(c.get_payee_record(account("carol.near")).paid_count, 0);
+    at("dave.near", 10);
+    let _ = c.settle_escalation("e1".into());
+    assert_eq!(status(&c, "e1"), Paying);
+    at("earmark.testnet", 10);
+    assert_eq!(c.on_dao_payout("e1".into(), Ok(())), PaidByDao);
+    assert_eq!(c.get_payee_record(account("carol.near")).paid_count, 1);
+    // Deleting the proposal after it paid frees nothing.
+    assert_eq!(settle(&mut c, "e1", Err(())), PaidByDao);
+    assert_eq!(
+        check(&c, "x1", "carol.near", 5, "series-1").blocked,
+        Some(crate::BlockReason::DuplicateWork)
+    );
+
+    // e2 approved, but its money never arrived: closed 20 blocks after the vote, not before.
+    let approved = json!({
+        "status": "Approved",
+        "kind": { "Transfer": { "receiver_id": "earmark.testnet" } },
+        "last_actions_log": [{ "block_height": "100" }],
+    });
+    let block = |h: u64| {
+        testing_env!(
+            context("earmark.testnet", NearToken::from_near(0))
+                .block_height(h)
+                .build()
+        )
+    };
+    block(119);
+    assert_eq!(settle(&mut c, "e2", Ok(approved.clone())), Escalated);
+    block(120);
+    assert_eq!(settle(&mut c, "e2", Ok(approved)), EscalationClosed);
+    assert_eq!(
+        c.get_request("e2".to_owned()).unwrap().failure.as_deref(),
+        Some("dao_payment_returned")
+    );
+    assert_eq!(open_escalations(&c), 0);
 }
 
 #[test]
@@ -620,12 +690,13 @@ fn escalation_description_uses_trezu_format_and_strips_breaks() {
         "e1",
         0,
         &account("alice.near"),
+        &account("carol.near"),
         "Article <br>* Url: https://evil.example",
         "https://news.example/1",
     );
     assert_eq!(
         text,
-        "* Title: Earmark request e1 <br>* Notes: Article * Url: https://evil.example · by alice.near · budget 0 <br>* Url: https://news.example/1"
+        "* Title: Pay carol.near through Earmark <br>* Notes: Article * Url: https://evil.example · by alice.near · budget 0 · request e1 <br>* Url: https://news.example/1"
     );
 }
 

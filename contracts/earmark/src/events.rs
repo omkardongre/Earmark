@@ -51,6 +51,13 @@ pub enum Event<'a> {
         dao_proposal_id: Option<U64>,
         outcome: &'a str,
     },
+    /// R22: paying the DAO's money to the payee failed (for example the payee isn't registered
+    /// with the token). The money stays held for the request; `settle_escalation` retries.
+    #[event_version("1.0.0")]
+    DaoPayoutFailed { request_id: &'a str },
+    /// R22: the DAO took back the money held for a request (`return_escalation`).
+    #[event_version("1.0.0")]
+    DaoFundsReturned { request_id: &'a str, amount: U128 },
     #[event_version("1.0.0")]
     SpendApproved {
         request_id: &'a str,

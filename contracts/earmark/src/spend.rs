@@ -25,6 +25,13 @@ const GAS_ON_ESCALATED: Gas = Gas::from_tgas(10);
 const GAS_ON_POLICY: Gas = Gas::from_tgas(45);
 const GAS_GET_PROPOSAL: Gas = Gas::from_tgas(10);
 const GAS_ON_SETTLE: Gas = Gas::from_tgas(15);
+const GAS_ON_DAO_PAYOUT: Gas = Gas::from_tgas(8);
+/// Kept free in `ft_on_transfer` before it pays out the DAO's money in the same transaction.
+const GAS_DAO_PAYOUT_MARGIN: Gas = Gas::from_tgas(4);
+/// R22: blocks after the approving vote before `settle_escalation` trusts a proposal that is
+/// still `Approved` (Sputnik runs the transfer a block or two after the vote, and turns the
+/// proposal `Failed` if it fails). About 11 s.
+pub const SETTLE_WAIT_BLOCKS: u64 = 20;
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 /// NEAR kept back from the bond float for the contract's own storage growth.
 const STORAGE_RESERVE: NearToken = NearToken::from_millinear(500);
@@ -237,16 +244,23 @@ impl Contract {
             .unwrap_or_default()
     }
 
-    /// Anyone (R18). Reads the escalation's DAO proposal and the DAO policy, then records the
-    /// outcome: approved → `paid_by_dao`; rejected, removed, expired, moved or not found →
-    /// `escalation_closed`. Either way the spender's escalation slot is freed. Still being voted
-    /// on → no change. Call it a few blocks after the last vote: Sputnik marks a proposal
-    /// approved before its transfer runs.
+    /// Anyone (R18, R22).
+    /// - `dao_funded` (the DAO's money is held here): pays the payee; `paid_by_dao` on success.
+    /// - `escalated`: reads the DAO proposal and policy. Rejected, removed, expired, moved or
+    ///   not found → `escalation_closed`. Approved but its money never reached Earmark
+    ///   (`SETTLE_WAIT_BLOCKS` after the vote) → `escalation_closed` (`dao_payment_returned`).
+    ///   A proposal filed before R22 that paid the payee directly → `paid_by_dao` once it has
+    ///   stayed approved that long. Still being voted on → no change.
     pub fn settle_escalation(&mut self, request_id: String) -> Promise {
         let request = self
             .requests
             .get(&request_id)
+            .cloned()
             .unwrap_or_else(|| env::panic_str("unknown_request"));
+        if request.status == RequestStatus::DaoFunded {
+            let token_id = self.envelope_token(&request);
+            return self.pay_from_dao(&token_id, &request_id, request);
+        }
         require!(request.status == RequestStatus::Escalated, "not_escalated");
         let proposal_id = request
             .dao_proposal_id
@@ -284,7 +298,7 @@ impl Contract {
             // Trezu Requestor deleting it).
             Err(_) => Some("removed"),
             Ok(p) => match p.get("status").and_then(|s| s.as_str()) {
-                Some("Approved") => Some("approved"),
+                Some("Approved") => approved_outcome(p),
                 Some("Rejected") => Some("rejected"),
                 Some("Removed") => Some("removed"),
                 Some("Expired") => Some("expired"),
@@ -306,8 +320,15 @@ impl Contract {
         }
         .emit();
         if outcome == "approved" {
+            // Only a proposal filed before R22, which paid the payee directly.
             self.free_escalation_slot(&request);
             self.count_payment(&request);
+            Event::SpendPaid {
+                request_id: &request_id,
+                payee: &request.payee,
+                amount: request.amount,
+            }
+            .emit();
             let mut request = request;
             request.status = RequestStatus::PaidByDao;
             self.requests.insert(request_id, request);
@@ -345,6 +366,103 @@ impl Contract {
         }
     }
 
+    /// R22: result of paying the DAO's money to the payee. Success → `paid_by_dao`, counted for
+    /// the spender and payee. Failure → back to `dao_funded`, money still held, so anyone can
+    /// retry with `settle_escalation` (for example after the payee registers with the token).
+    #[private]
+    pub fn on_dao_payout(
+        &mut self,
+        request_id: String,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> RequestStatus {
+        let mut request = self.requests.get(&request_id).cloned().unwrap();
+        if request.status != RequestStatus::Paying {
+            return request.status;
+        }
+        if result.is_ok() {
+            self.free_escalation_slot(&request);
+            self.count_payment(&request);
+            Event::SpendPaid {
+                request_id: &request_id,
+                payee: &request.payee,
+                amount: request.amount,
+            }
+            .emit();
+            request.status = RequestStatus::PaidByDao;
+            request.failure = None;
+        } else {
+            Event::DaoPayoutFailed {
+                request_id: &request_id,
+            }
+            .emit();
+            request.status = RequestStatus::DaoFunded;
+            request.failure = Some("payout_failed".to_owned());
+        }
+        let status = request.status;
+        self.requests.insert(request_id, request);
+        status
+    }
+
+    /// DAO only, through a `FunctionCall` proposal (R22). Sends the money held for a
+    /// `dao_funded` request back to the DAO and closes the request, freeing its work claim.
+    /// For a payout that keeps failing.
+    pub fn return_escalation(&mut self, request_id: String) -> Promise {
+        self.assert_dao();
+        let mut request = self
+            .requests
+            .get(&request_id)
+            .cloned()
+            .unwrap_or_else(|| env::panic_str("unknown_request"));
+        require!(request.status == RequestStatus::DaoFunded, "not_dao_funded");
+        let token_id = self.envelope_token(&request);
+        let amount = request.amount;
+        request.status = RequestStatus::Paying;
+        self.requests.insert(request_id.clone(), request);
+        ext_ft_core::ext(token_id)
+            .with_attached_deposit(ONE_YOCTO)
+            .with_static_gas(GAS_FT_TRANSFER)
+            .ft_transfer(
+                self.dao_id.clone(),
+                amount,
+                Some(format!("earmark return {request_id}")),
+            )
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_DAO_PAYOUT)
+                    .on_dao_return(request_id),
+            )
+    }
+
+    #[private]
+    pub fn on_dao_return(
+        &mut self,
+        request_id: String,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> RequestStatus {
+        let mut request = self.requests.get(&request_id).cloned().unwrap();
+        if request.status != RequestStatus::Paying {
+            return request.status;
+        }
+        if result.is_ok() {
+            Event::DaoFundsReturned {
+                request_id: &request_id,
+                amount: request.amount,
+            }
+            .emit();
+            self.release(
+                &request_id,
+                request,
+                RequestStatus::EscalationClosed,
+                Some("returned_to_dao"),
+            );
+            RequestStatus::EscalationClosed
+        } else {
+            request.status = RequestStatus::DaoFunded;
+            self.requests.insert(request_id, request);
+            RequestStatus::DaoFunded
+        }
+    }
+
     /// Reads the DAO's bond and files the Transfer proposal, paying the bond from this
     /// contract's own NEAR. Sputnik returns the bond after the vote (or after expiry and
     /// finalize); it keeps it only if the proposal is removed as spam.
@@ -378,15 +496,19 @@ impl Contract {
             &request_id,
             request.envelope_id.0,
             &request.spender,
+            &request.payee,
             &request.memo,
             &request.work_ref,
         );
+        // R22: the DAO sends the money to Earmark with the request id (`ft_transfer_call`), and
+        // Earmark pays the payee, so the payment is confirmed by Earmark's own transfer.
         let proposal = json!({
             "description": description,
             "kind": { "Transfer": {
                 "token_id": token_id,
-                "receiver_id": request.payee,
+                "receiver_id": env::current_account_id(),
                 "amount": request.amount,
+                "msg": json!({ "request_id": request_id }).to_string(),
             }},
         });
         ext_dao::ext(self.dao_id.clone())
@@ -552,6 +674,46 @@ impl Contract {
             )
     }
 
+    /// R22: pays the DAO's money held for `request` to its payee. The request is `paying`
+    /// until `on_dao_payout`, so a second call can't send it twice.
+    pub(crate) fn pay_from_dao(
+        &mut self,
+        token_id: &AccountId,
+        request_id: &str,
+        mut request: Request,
+    ) -> Promise {
+        let payee = request.payee.clone();
+        let amount = request.amount;
+        request.status = RequestStatus::Paying;
+        self.requests.insert(request_id.to_owned(), request);
+        ext_ft_core::ext(token_id.clone())
+            .with_attached_deposit(ONE_YOCTO)
+            .with_static_gas(GAS_FT_TRANSFER)
+            .ft_transfer(payee, amount, Some(format!("earmark {request_id}")))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_DAO_PAYOUT)
+                    .on_dao_payout(request_id.to_owned()),
+            )
+    }
+
+    /// Whether this call can still schedule `pay_from_dao` and finish. A DAO vote from Trezu
+    /// leaves `ft_on_transfer` about 28 Tgas (measured on mainnet, 9 Nov).
+    pub(crate) fn gas_left_for_dao_payout(&self) -> bool {
+        let left = env::prepaid_gas().saturating_sub(env::used_gas());
+        left >= GAS_FT_TRANSFER
+            .saturating_add(GAS_ON_DAO_PAYOUT)
+            .saturating_add(GAS_DAO_PAYOUT_MARGIN)
+    }
+
+    fn envelope_token(&self, request: &Request) -> AccountId {
+        self.envelopes
+            .get(&request.envelope_id.0)
+            .unwrap()
+            .token_id
+            .clone()
+    }
+
     fn can_pay_bond(&self, bond: NearToken) -> bool {
         free_near() >= bond.saturating_add(STORAGE_RESERVE)
     }
@@ -659,6 +821,37 @@ impl Contract {
 fn free_near() -> NearToken {
     let storage = env::storage_byte_cost().saturating_mul(u128::from(env::storage_usage()));
     env::account_balance().saturating_sub(storage)
+}
+
+/// R22: what an `Approved` proposal means for a request that is still `escalated`.
+/// - Sent to Earmark (filed after R22): the money would have made the request `dao_funded`.
+///   `SETTLE_WAIT_BLOCKS` after the vote it never came (Earmark refused it or it was refunded),
+///   so the payee wasn't paid: `dao_payment_returned`.
+/// - Sent to the payee directly (filed before R22): Sputnik turns the proposal `Failed` if its
+///   transfer fails, so still `Approved` that long after the vote means it paid.
+///
+/// `None` = wait. A proposal without Sputnik's action log (older DAO code) can't be timed: an
+/// R22 one waits, an older one is trusted as before.
+fn approved_outcome(proposal: &serde_json::Value) -> Option<&'static str> {
+    let to_earmark = proposal
+        .pointer("/kind/Transfer/receiver_id")
+        .and_then(|r| r.as_str())
+        == Some(env::current_account_id().as_str());
+    let last_vote = proposal
+        .get("last_actions_log")
+        .and_then(|log| log.as_array()?.last()?.get("block_height").cloned())
+        .and_then(|b| {
+            b.as_str()
+                .and_then(|s| s.parse::<u64>().ok())
+                .or(b.as_u64())
+        });
+    let waited = last_vote.map(|b| env::block_height() >= b.saturating_add(SETTLE_WAIT_BLOCKS));
+    match (to_earmark, waited) {
+        (true, Some(true)) => Some("dao_payment_returned"),
+        (true, _) => None,
+        (false, Some(false)) => None,
+        (false, _) => Some("approved"),
+    }
 }
 
 /// Sputnik's expiry rule: `submission_time + proposal_period < now`. Unreadable values count

@@ -21,7 +21,8 @@ pub enum Tier {
     Auto,
     /// Reserved; waits for one approver.
     OneApprover,
-    /// Becomes a Transfer proposal paid from the DAO treasury; nothing is reserved.
+    /// Becomes a DAO Transfer proposal that sends the amount from the treasury to Earmark,
+    /// which pays the payee and records it; nothing is reserved from the budget.
     Escalate,
 }
 
@@ -71,21 +72,27 @@ impl BlockReason {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RequestStatus {
-    /// Auto tier: transfer sent, waiting for its result.
+    /// Transfer to the payee sent, waiting for its result (auto tier, or DAO money being paid).
     Paying,
     PendingApproval,
     /// DAO proposal being filed.
     Escalating,
-    /// DAO proposal filed; the DAO vote decides and pays.
+    /// DAO proposal filed; the DAO vote decides.
     Escalated,
     Paid,
     Failed,
     Rejected,
     Expired,
-    /// R18: the DAO approved and ran the Transfer proposal. The work claim stays.
+    /// R18: the payee received the DAO's money; Earmark saw its own transfer succeed (or, for
+    /// a proposal filed before R22 that paid the payee directly, the vote passed and stayed
+    /// passed). The work claim stays.
     PaidByDao,
-    /// R18: the DAO proposal was rejected, expired, removed or moved. `failure` says which.
+    /// R18: the DAO proposal was rejected, expired, removed or moved, or its money came back.
+    /// `failure` says which.
     EscalationClosed,
+    /// R22: the DAO's money arrived at Earmark and is held for this request until it is paid
+    /// out. `failure` is set if a payout attempt failed; `settle_escalation` tries again.
+    DaoFunded,
 }
 
 #[near(serializers = [borsh, json])]
@@ -147,11 +154,13 @@ pub fn spender_key(envelope_id: EnvelopeId, spender: &AccountId) -> CryptoHash {
 }
 
 /// Trezu's description format, so the escalation shows as a readable Payment Request there and
-/// in its alerts. `<br>` and line breaks are removed from user text so it can't add fields.
+/// in its alerts. The proposal's recipient is Earmark, so the title names the real payee.
+/// `<br>` and line breaks are removed from user text so it can't add fields.
 pub fn escalation_description(
     request_id: &str,
     envelope_id: EnvelopeId,
     spender: &AccountId,
+    payee: &AccountId,
     memo: &str,
     work_ref: &str,
 ) -> String {
@@ -162,14 +171,14 @@ pub fn escalation_description(
             .join(" ")
     };
     let memo = clean(memo);
+    let request_id = clean(request_id);
     let notes = if memo.is_empty() {
-        format!("by {spender} · budget {envelope_id}")
+        format!("by {spender} · budget {envelope_id} · request {request_id}")
     } else {
-        format!("{memo} · by {spender} · budget {envelope_id}")
+        format!("{memo} · by {spender} · budget {envelope_id} · request {request_id}")
     };
     format!(
-        "* Title: Earmark request {} <br>* Notes: {notes} <br>* Url: {}",
-        clean(request_id),
+        "* Title: Pay {payee} through Earmark <br>* Notes: {notes} <br>* Url: {}",
         clean(work_ref)
     )
 }
