@@ -50,9 +50,64 @@ export const variants = {
   ghost: "text-muted hover:bg-slate-100 hover:text-ink",
 };
 
-export function Button({ variant = "primary", className = "", ...props }: ButtonProps) {
+/**
+ * `busy`: the action is waiting for the wallet. The button keeps its colour and shows a spinner
+ * (a disabled button would grey out and look like every other one), and ignores clicks.
+ */
+export function Button({
+  variant = "primary",
+  className = "",
+  busy = false,
+  children,
+  onClick,
+  ...props
+}: ButtonProps & { busy?: boolean }) {
   return (
-    <button type="button" className={`${base} ${variants[variant]} ${className}`} {...props} />
+    <button
+      type="button"
+      className={`${base} ${variants[variant]} ${busy ? "pointer-events-none" : ""} ${className}`}
+      aria-busy={busy || undefined}
+      aria-disabled={busy || undefined}
+      onClick={busy ? undefined : onClick}
+      {...props}
+    >
+      {busy && <Spinner />}
+      {children}
+    </button>
+  );
+}
+export function Spinner() {
+  return (
+    <span
+      className="size-4 shrink-0 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none"
+      aria-hidden
+    />
+  );
+}
+/** A quiet action (a link-style button): secondary choices next to one main button. */
+export function TextButton({
+  tone = "muted",
+  className = "",
+  busy = false,
+  children,
+  onClick,
+  ...props
+}: ComponentProps<"button"> & { tone?: "muted" | "danger"; busy?: boolean }) {
+  const color =
+    tone === "danger"
+      ? "text-rose-700 hover:bg-rose-50"
+      : "text-muted hover:bg-slate-100 hover:text-ink";
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[15px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${color} ${busy ? "pointer-events-none" : ""} ${className}`}
+      aria-busy={busy || undefined}
+      onClick={busy ? undefined : onClick}
+      {...props}
+    >
+      {busy && <Spinner />}
+      {children}
+    </button>
   );
 }
 

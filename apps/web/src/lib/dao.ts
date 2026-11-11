@@ -62,6 +62,15 @@ export function proposeRoles(policy: DaoPolicy, account: string, kind: KindLabel
 export const canPropose = (policy: DaoPolicy, account: string, kind: KindLabel) =>
   proposeRoles(policy, account, kind).length > 0;
 
+/**
+ * Named members (council-style group roles) who may file this kind of proposal. Roles open to
+ * everyone are left out: they don't make someone part of the DAO.
+ */
+export const groupProposers = (policy: DaoPolicy, kind: KindLabel): string[] => [
+  ...new Set(
+    policy.roles.filter((r) => permits(r, kind, "AddProposal")).flatMap((r) => roleMembers(r)),
+  ),
+];
 /** Whether `account` may vote yes on a proposal of this kind. */
 export const canApprove = (policy: DaoPolicy, account: string, kind: KindLabel) =>
   policy.roles.some((r) => inRole(r, account) && permits(r, kind, "VoteApprove"));

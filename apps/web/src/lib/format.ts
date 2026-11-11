@@ -81,6 +81,17 @@ export const TASK_STATUS: Record<
   cancelled: { label: "Cancelled", tone: "gray" },
 };
 
+/**
+ * Reasons the contract writes itself when a task moves back or ends. Any other reason is a
+ * reviewer's own words (why the work was sent back or rejected).
+ */
+export const TASK_SYSTEM_REASON: Record<string, string> = {
+  claim_expired: "The last person ran out of time.",
+  released: "The last person gave it back.",
+  transfer_failed: "The payment didn’t go through. The money is set aside again.",
+  funds_gone: "The payment failed and the budget no longer had the money.",
+  closed: "The budget was closed.",
+};
 /** Plain-words reason for a blocked payment, with what to do about it. */
 export const BLOCKED: Record<BlockReason, string> = {
   closed: "This budget is closed.",
@@ -142,5 +153,8 @@ export function errorMessage(e: unknown): string {
   };
   if (code && known[code]) return known[code];
   if (/reject|cancel|denied|closed by user/i.test(text)) return "Cancelled in your wallet.";
+  // The wallet window closed without a result (near-connect's "Wallet closed").
+  if (/^wallet closed$/i.test(text.trim()))
+    return "The wallet closed before it finished. Nothing changed here. Try again.";
   return text.length > 160 ? `${text.slice(0, 160)}…` : text;
 }
