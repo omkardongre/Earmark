@@ -722,6 +722,31 @@ async fn mainnet_upgrade_rehearsal() -> TestResult {
     };
     let before = snapshot().await?;
 
+    // 0. As `upgrade.ts store` does: top the contract up so it keeps 0.55 NEAR free once the
+    //    bigger code is stored (otherwise the deploy fails for lack of storage NEAR).
+    let old_code = Contract(contract.clone()).wasm().fetch_from(&net).await?;
+    let old_len = near_sdk::base64::Engine::decode(
+        &near_sdk::base64::engine::general_purpose::STANDARD,
+        &old_code.data.code_base64,
+    )?
+    .len() as u128;
+    let per_byte = 10i128.pow(19);
+    let free_after = before_account.amount.as_yoctonear() as i128
+        - before_account.storage_usage as i128 * per_byte
+        - (new_code.len() as i128 - old_len as i128) * per_byte;
+    let keep = NearToken::from_millinear(550).as_yoctonear() as i128;
+    if free_after < keep {
+        let top = NearToken::from_yoctonear((keep - free_after) as u128 + 10u128.pow(22));
+        Tokens::account(admin.id.clone())
+            .send_to(contract.clone())
+            .near(top)
+            .with_signer(admin.signer.clone())
+            .send_to(&net)
+            .await?
+            .into_result()?;
+        println!("topped the contract up with {top}");
+    }
+
     // 1. The helper stores the new code in the treasury (raw bytes, deposit per byte).
     let helper_start = code_hash(helper.id.clone()).await?.amount;
     let deposit = NearToken::from_yoctonear(10u128.pow(19) * (new_code.len() as u128 + 32));

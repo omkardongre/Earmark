@@ -941,3 +941,203 @@ fn contract_cannot_be_deleted_while_a_budget_is_open() {
     at("club.sputnik-dao.near", 0);
     let _ = c.delete_contract();
 }
+
+// --- Tasks (bounties) and contributor trust ---
+
+fn task(c: &mut Contract, amount: u128, claim_days: Option<u32>) -> U64 {
+    c.post_task(
+        U64(0),
+        "Write the guide".to_owned(),
+        String::new(),
+        U128(amount),
+        None,
+        claim_days,
+    )
+}
+
+/// Posts, claims, submits and accepts a task; returns its id and the payment's request id.
+fn accepted_task(c: &mut Contract, amount: u128, work: &str, t: u64) -> (U64, String) {
+    at("alice.near", t);
+    let id = task(c, amount, None);
+    at("carol.near", t);
+    c.claim_task(id);
+    c.submit_work(id, work.to_owned(), None);
+    at("alice.near", t);
+    let _ = c.accept_task(id);
+    (id, c.get_task(id).unwrap().request_id.unwrap())
+}
+
+#[test]
+fn task_reserves_at_posting_and_pays_through_the_tiers() {
+    use crate::{TaskStatus, Tier};
+    let mut c = spending_contract(100);
+    at("alice.near", 0);
+    let id = task(&mut c, 20, None);
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert_eq!((view.available, view.committed), (U128(80), U128(20)));
+
+    at("carol.near", 1);
+    c.claim_task(id);
+    c.submit_work(id, "https://example.com/pr/1".to_owned(), None);
+    assert_eq!(c.check_accept(id).tier, Some(Tier::OneApprover));
+    at("alice.near", 2);
+    let _ = c.accept_task(id);
+    let request_id = c.get_task(id).unwrap().request_id.unwrap();
+    assert_eq!(c.get_envelope(U64(0)).unwrap().committed, U128(20));
+
+    at("bob.near", 3);
+    let _ = c.approve(request_id.clone());
+    at("earmark.testnet", 4);
+    c.on_paid(request_id, Ok(()));
+
+    assert_eq!(c.get_task(id).unwrap().status, TaskStatus::Paid);
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert_eq!((view.balance, view.committed), (U128(80), U128(0)));
+    let trust = c.get_contributor_trust(U64(0), account("carol.near"));
+    assert_eq!((trust.record.tasks_paid, trust.trusted), (1, false));
+}
+
+#[test]
+fn trusted_contributor_skips_the_approver_until_a_strike() {
+    use crate::{TaskRules, Tier};
+    let mut c = spending_contract(200);
+    at("club.sputnik-dao.near", 0);
+    c.set_task_rules(
+        U64(0),
+        TaskRules {
+            trusted_limit: U128(40),
+            min_tasks: 1,
+            min_days: 0,
+            strike_days: 90,
+            min_task_amount: U128(0),
+        },
+    );
+    assert_eq!(
+        check(&c, "x", "carol.near", 30, "w").tier,
+        Some(Tier::OneApprover)
+    );
+
+    let (_, request_id) = accepted_task(&mut c, 5, "https://example.com/pr/1", 1);
+    at("earmark.testnet", 2);
+    c.on_paid(request_id, Ok(()));
+    // Lead's own limit is 10; a trusted contributor clears at once up to 40, not above.
+    assert_eq!(
+        check(&c, "x", "carol.near", 30, "w").tier,
+        Some(Tier::Trusted)
+    );
+    assert_eq!(
+        check(&c, "x", "carol.near", 45, "w").tier,
+        Some(Tier::OneApprover)
+    );
+
+    at("alice.near", 3);
+    let id = task(&mut c, 5, None);
+    at("carol.near", 3);
+    c.claim_task(id);
+    c.submit_work(id, "https://example.com/pr/2".to_owned(), None);
+    at("alice.near", 4);
+    c.reject_work(id, "copied from another repo".to_owned(), true);
+    assert_eq!(
+        check(&c, "x", "carol.near", 30, "w").tier,
+        Some(Tier::OneApprover)
+    );
+}
+
+#[test]
+fn failed_task_payment_holds_again_and_close_cancels() {
+    use crate::TaskStatus;
+    use near_sdk::PromiseResult;
+    let mut c = spending_contract(100);
+    let (id, request_id) = accepted_task(&mut c, 8, "https://example.com/pr/1", 0);
+    assert_eq!(c.get_envelope(U64(0)).unwrap().in_flight, U128(8));
+
+    testing_env!(
+        context("earmark.testnet", NearToken::from_near(0)).build(),
+        near_sdk::test_vm_config(),
+        near_sdk::RuntimeFeesConfig::test(),
+        Default::default(),
+        vec![PromiseResult::Failed],
+    );
+    c.on_paid(request_id, Err(near_sdk::PromiseError::Failed));
+    let t = c.get_task(id).unwrap();
+    assert_eq!(
+        (t.status, t.reason.as_deref()),
+        (TaskStatus::Submitted, Some("transfer_failed"))
+    );
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert_eq!((view.committed, view.in_flight), (U128(8), U128(0)));
+
+    at("club.sputnik-dao.near", 1);
+    let _ = c.close_envelope(U64(0));
+    assert_eq!(c.get_task(id).unwrap().status, TaskStatus::Cancelled);
+    assert_eq!(c.get_envelope(U64(0)).unwrap().committed, U128(0));
+}
+
+#[test]
+#[should_panic(expected = "too_many_claims")]
+fn claims_expire_and_one_is_open_at_a_time() {
+    use crate::TaskStatus;
+    let mut c = spending_contract(100);
+    at("alice.near", 0);
+    let first = task(&mut c, 5, Some(1));
+    let second = task(&mut c, 5, Some(1));
+    at("carol.near", 0);
+    c.claim_task(first);
+    // After the 1-day deadline anyone can open it again.
+    at("someone.near", 86_401);
+    c.release_claim(first);
+    assert_eq!(c.get_task(first).unwrap().status, TaskStatus::Open);
+    at("carol.near", 86_402);
+    c.claim_task(first);
+    c.claim_task(second);
+}
+
+#[test]
+fn tasks_survive_the_upgrade_from_the_r23_layout() {
+    let mut c = spending_contract(60);
+    let Contract {
+        dao_id,
+        token_ids,
+        envelopes,
+        next_envelope_id,
+        loosen_delay_secs,
+        requests,
+        work_claims,
+        work_overrides,
+        records,
+        eligibility,
+        changes,
+        queued_ids,
+        next_change_id,
+        pending_payees,
+        payee_records,
+        request_counts,
+        ..
+    } = c;
+    let old = crate::ContractV2 {
+        dao_id,
+        token_ids,
+        envelopes,
+        next_envelope_id,
+        loosen_delay_secs,
+        requests,
+        work_claims,
+        work_overrides,
+        records,
+        eligibility,
+        changes,
+        queued_ids,
+        next_change_id,
+        pending_payees,
+        payee_records,
+        request_counts,
+    };
+    near_sdk::env::state_write(&old);
+    drop(old);
+    c = Contract::migrate();
+
+    at("alice.near", 0);
+    let id = task(&mut c, 20, None);
+    assert_eq!(id, U64(0));
+    assert_eq!(c.get_envelope(U64(0)).unwrap().available, U128(40));
+}
