@@ -240,7 +240,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 
 ### near.com payees (NEAR Intents)
 
-**Built 11–12 Nov, not committed or installed yet** (testnet dry run on a throwaway contract only; mainnet waits for the one combined upgrade with tasks). Research: `research/solution-research/19-intents-receiving-verified-2026-11-11.md`.
+**Installed on testnet** (12 Nov, reproducible build at `508a355`, code `DGwhd93…UGrx`, DAO proposals 22 and 23), but off there: Intents has no testnet, so `intents_contract` is none and the app hides the option. Tried end to end on a throwaway contract paying a copy of the real Intents code. **Mainnet waits** for the one combined upgrade with tasks. Research: `research/solution-research/19-intents-receiving-verified-2026-11-11.md`.
 
 - **What it is:** an approver adds a payee as "near.com (any wallet)" (`approve_intents_payee`, same waiting period as any new payee). Earmark pays them with `ft_transfer_call` to the Intents contract with `msg` = their account id and nothing else, so it lands in their near.com balance. They withdraw on near.com with the same wallet (MetaMask, Phantom, passkey or a NEAR wallet) to Base or any other chain. A MetaMask user's id is their `0x…` address, lowercase. No token setup is needed for them.
 - **Paid only on full credit:** the payment counts as paid only when the token reports the full amount was kept (`ft_resolve_transfer`). A refund (Intents paused, bad id) fails it like any failed transfer: the money stays in the budget and the work link is free again. Earmark never sends Intents actions, so the Oct 2026 refund exploit (it needed a notify action) doesn't apply.
