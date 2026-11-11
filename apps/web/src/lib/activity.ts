@@ -1,7 +1,7 @@
 // Turns contract events into plain rows for the activity feed: who did what, the amount, a status.
 import { money, shortName } from "./format";
 import type { EarmarkEvent } from "./near";
-import type { SpendRequest, TokenMeta } from "./types";
+import type { SpendRequest, Task, TokenMeta } from "./types";
 
 type ChipTone = "green" | "amber" | "blue" | "gray" | "red";
 
@@ -11,8 +11,10 @@ export type Activity = {
   text: string;
   amount: string | null;
   chip: { label: string; tone: ChipTone } | null;
-  /** Payment rows open the payment page; other rows open their transaction. */
+  /** Payment rows open the payment page; task rows open the task; others open their transaction. */
   requestId: string | null;
+  /** In-app page for a task row ("/budgets/0/tasks/4"). */
+  href: string | null;
   tx: string;
   timestampNs: string;
   budget: string | undefined;
@@ -92,6 +94,15 @@ export function activityFeed(
   events: EarmarkEvent[],
   requests: Map<string, SpendRequest>,
   metaFor: (budget: string) => TokenMeta | undefined,
+  {
+    tasks = new Map(),
+    waiting = null,
+  }: {
+    /** Tasks named by task events: their budget, title and people. */
+    tasks?: Map<string, Task>;
+    /** Ids of rule changes still in their waiting period; null if unknown. */
+    waiting?: Set<string> | null;
+  } = {},
 ): Activity[] {
   const out: Activity[] = [];
   const ranks: number[] = [];
@@ -108,15 +119,20 @@ export function activityFeed(
     const change = d.change as Change;
     const requestId = str("request_id") || null;
     const req = requestId ? requests.get(requestId) : undefined;
+    const taskId = str("task_id") || null;
+    const task = taskId ? tasks.get(taskId) : undefined;
     const budget =
       typeof d.envelope_id === "string" || typeof d.envelope_id === "number"
         ? String(d.envelope_id)
-        : req?.envelope_id;
+        : (req?.envelope_id ?? task?.envelope_id);
     const meta = budget === undefined ? undefined : metaFor(budget);
     if (!meta) return;
     const amount = (a?: string) => money(a || req?.amount || "0", meta);
     const payee = req ? shortName(req.payee) : "someone";
-    const people = [e.signer, req?.spender, req?.payee].filter((x): x is string => !!x);
+    const people = [e.signer, req?.spender, req?.payee, task?.lead, task?.claimant].filter(
+      (x): x is string => !!x,
+    );
+    const title = task ? `“${task.title}”` : "a task";
 
     let row: Pick<Activity, "text" | "amount" | "chip"> | null = null;
     switch (e.event) {
@@ -213,7 +229,11 @@ export function activityFeed(
         row = {
           text: `${name("queued_by")} proposed: ${describeChange(change, meta)}`,
           amount: null,
-          chip: { label: "Waiting period", tone: "amber" },
+          // Once the change applies, its own "Now in effect" row says so: no stale chip here.
+          chip:
+            waiting?.has(str("change_id")) === true
+              ? { label: "Waiting period", tone: "amber" }
+              : null,
         };
         break;
       case "change_applied":
@@ -237,10 +257,44 @@ export function activityFeed(
         break;
       case "task_posted":
         row = {
-          text: `${name("lead")} posted a task`,
+          text: `${name("lead")} posted ${title}`,
           amount: amount(str("amount")),
-          chip: { label: "Task", tone: "blue" },
+          chip: null,
         };
+        break;
+      case "task_claimed":
+        row = { text: `${name("claimant")} took ${title}`, amount: null, chip: null };
+        break;
+      case "work_submitted":
+        row = {
+          text: `${shortName(task?.claimant ?? e.signer)} sent work for ${title}`,
+          amount: null,
+          chip: null,
+        };
+        break;
+      case "work_rejected":
+        row = {
+          text:
+            d.for_cause === true
+              ? `${name("by")} rejected ${name("contributor")}’s work on ${title}`
+              : `${name("by")} sent ${title} back to ${name("contributor")} to fix`,
+          amount: null,
+          chip: null,
+        };
+        people.push(str("contributor"));
+        break;
+      case "claim_released":
+        row = {
+          text:
+            str("by") === task?.lead
+              ? `${name("by")} opened ${title} to others`
+              : `${name("by")} gave up ${title}`,
+          amount: null,
+          chip: null,
+        };
+        break;
+      case "task_cancelled":
+        row = { text: `${name("by")} cancelled ${title}`, amount: null, chip: null };
         break;
       case "envelope_closed":
         row = {
@@ -256,6 +310,7 @@ export function activityFeed(
         // One row per payment: the key is the payment, so the feed's merge of pages keeps one.
         key: req && requestId ? `req-${requestId}` : `${base}-${nth}`,
         requestId: req ? requestId : null,
+        href: !req && task && taskId ? `/budgets/${task.envelope_id}/tasks/${taskId}` : null,
         tx: e.tx,
         timestampNs: e.timestampNs,
         budget,

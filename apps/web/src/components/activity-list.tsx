@@ -157,8 +157,9 @@ function Row({ a }: { a: Activity }) {
     </>
   );
   const cls = "flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-slate-50";
-  return a.requestId ? (
-    <Link href={`/payments/${a.requestId}`} className={cls}>
+  const page = a.requestId ? `/payments/${a.requestId}` : a.href;
+  return page ? (
+    <Link href={page} className={cls}>
       {body}
     </Link>
   ) : (

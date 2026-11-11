@@ -6,11 +6,13 @@ import {
   type EarmarkEvent,
   getConfig,
   getRequest,
+  getTask,
   getToken,
   listBudgets,
+  listQueued,
   listRequests,
 } from "./near";
-import type { Budget, Config, SpendRequest, TokenMeta } from "./types";
+import type { Budget, Config, SpendRequest, Task, TokenMeta } from "./types";
 
 export type Base = {
   config: Config;
@@ -25,6 +27,25 @@ export async function loadBase(): Promise<Base> {
   return { config, budgets, meta };
 }
 
+/**
+ * What each payee was paid from this budget: account -> base units. Reads every request (up to
+ * 1,000, 100 per call). Never throws: on a read problem the "You earned" line just doesn't show.
+ */
+export async function paidByPayee(b: Budget): Promise<Record<string, string>> {
+  const pages = Math.ceil(Math.min(Number(b.request_count), 1000) / 100);
+  try {
+    const lists = await Promise.all(
+      Array.from({ length: pages }, (_, i) => listRequests(b.id, { from: i * 100, limit: 100 })),
+    );
+    const out = new Map<string, bigint>();
+    for (const [, r] of lists.flat())
+      if (r.status === "paid" || r.status === "paid_by_dao")
+        out.set(r.payee, (out.get(r.payee) ?? 0n) + BigInt(r.amount));
+    return Object.fromEntries([...out].map(([k, v]) => [k, v.toString()]));
+  } catch {
+    return {};
+  }
+}
 /** Newest requests of every budget (one page each), keyed by request id. */
 export async function loadRequests(budgets: Budget[], limit = 100) {
   const lists = await Promise.all(budgets.map((b) => listRequests(b.id, { limit })));
@@ -66,14 +87,24 @@ export async function loadActivity(
 ): Promise<ActivityPage> {
   const fallback = base.meta.values().next().value as TokenMeta | undefined;
   const requests = new Map<string, SpendRequest>();
+  const tasks = new Map<string, Task>();
+  // Which rule changes still wait, so an applied change's "proposed" row drops its chip.
+  const waiting = skipChanges
+    ? null
+    : await listQueued(budget)
+        .then((l) => new Set(l.filter(([, c]) => c.status === "queued").map(([id]) => id)))
+        .catch(() => null);
   const items: Activity[] = [];
   const keys = new Set<string>();
   let next: string | null = cursor ?? null;
   try {
     for (let i = 0; i < 6; i++) {
       const page = await contractEvents({ cursor: next ?? undefined });
-      await fillRequests(page.events, requests);
-      const rows = activityFeed(page.events, requests, (b) => base.meta.get(b) ?? fallback).filter(
+      await Promise.all([fillRequests(page.events, requests), fillTasks(page.events, tasks)]);
+      const rows = activityFeed(page.events, requests, (b) => base.meta.get(b) ?? fallback, {
+        tasks,
+        waiting,
+      }).filter(
         (a) =>
           (budget === undefined || a.budget === budget) &&
           (account === undefined || a.people.includes(account)) &&
@@ -110,6 +141,32 @@ async function fillRequests(events: EarmarkEvent[], into: Map<string, SpendReque
   for (const [id, r] of found) if (r) into.set(id, r);
 }
 
+const TASK_EVENTS = new Set([
+  "task_posted",
+  "task_claimed",
+  "claim_released",
+  "work_submitted",
+  "work_rejected",
+  "task_accepted",
+  "task_cancelled",
+  "task_settled",
+]);
+/** Looks up the tasks named by these events (most carry only a task id). Never throws. */
+async function fillTasks(events: EarmarkEvent[], into: Map<string, Task>) {
+  const ids = [
+    ...new Set(
+      events.flatMap((e) =>
+        TASK_EVENTS.has(e.event) && typeof e.data.task_id === "string" && !into.has(e.data.task_id)
+          ? [e.data.task_id]
+          : [],
+      ),
+    ),
+  ];
+  const found = await Promise.all(
+    ids.map(async (id) => [id, await getTask(id).catch(() => null)] as const),
+  );
+  for (const [id, t] of found) if (t) into.set(id, t);
+}
 /** approver -> payments waiting in their budgets. Drives the Approvals tab and its badge. */
 export async function approverQueue(): Promise<Record<string, number>> {
   try {
