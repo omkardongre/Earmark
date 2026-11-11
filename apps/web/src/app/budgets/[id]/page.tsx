@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/activity-list";
 import { BudgetCard } from "@/components/budget-card";
 import { PaymentsTable } from "@/components/payments-table";
+import { RequestBanner } from "@/components/request-form";
 import { Disclosure, Person, Pill, Section } from "@/components/ui";
 import { loadActivity, loadBase } from "@/lib/data";
-import { duration, money, shortName } from "@/lib/format";
+import { duration, money } from "@/lib/format";
 import { listRequests } from "@/lib/near";
 import { readPrefill } from "@/lib/request-link";
 
@@ -41,13 +42,11 @@ export default async function BudgetPage({
       </div>
 
       {prefill && (
-        <p className="rounded-2xl bg-brand-soft px-5 py-4">
-          <span className="font-semibold">{shortName(prefill.payee)}</span> asks to be paid{" "}
-          <span className="tabular font-semibold">
-            {prefill.amount} {m.symbol}
-          </span>
-          . A lead of this budget reviews it in the pay form.
-        </p>
+        <RequestBanner
+          payee={prefill.payee}
+          amount={`${prefill.amount} ${m.symbol}`}
+          spenders={b.spenders.map(([a]) => a)}
+        />
       )}
 
       <div className="grid items-start gap-8 lg:grid-cols-[1fr_22rem]">

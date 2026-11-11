@@ -182,7 +182,8 @@ export function RequestForm({
           {problem}
         </p>
       )}
-      <Button type="submit" className="w-full">
+      {/* On phones the button stays above the bottom nav while the form scrolls. */}
+      <Button type="submit" className="sticky bottom-24 w-full shadow-lg sm:static sm:shadow-none">
         Get request link
       </Button>
     </form>
@@ -202,4 +203,32 @@ export function AskButton({
   const { accountId } = useWallet();
   if (!accountId || !payees.includes(accountId) || spenders.includes(accountId)) return null;
   return <ButtonLink href={`/budgets/${budgetId}/request`}>Ask to be paid</ButtonLink>;
+}
+
+/** On a budget page opened from a request link: who asks for what, and what to do next. */
+export function RequestBanner({
+  payee,
+  amount,
+  spenders,
+}: {
+  payee: string;
+  amount: string;
+  spenders: string[];
+}) {
+  const { accountId, connect } = useWallet();
+  const lead = accountId !== null && spenders.includes(accountId);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-brand-soft px-5 py-4">
+      <p>
+        <span className="font-semibold">{shortName(payee)}</span> asks to be paid{" "}
+        <span className="tabular font-semibold">{amount}</span>.{" "}
+        {!accountId
+          ? "Sign in as a lead of this budget to review it."
+          : lead
+            ? "Review it in the pay form."
+            : "Only a lead of this budget can pay this."}
+      </p>
+      {!accountId && <Button onClick={() => void connect()}>Sign in to review</Button>}
+    </div>
+  );
 }
