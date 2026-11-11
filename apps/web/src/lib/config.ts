@@ -56,5 +56,5 @@ export const TRY_URL = NETWORK === "mainnet" ? `${TESTNET_APP}/try` : "/try";
 // mirror fixtures/testnet-demo.json (`dao`, `code_hash`); update them when a DAO upgrade lands.
 export const EXPECTED_DAO = process.env.NEXT_PUBLIC_DAO || "community-news.sputnikv2.testnet";
 export const EXPECTED_CODE_HASH =
-  process.env.NEXT_PUBLIC_CODE_HASH || "6H2m7rLWiqkwEdr7DCTN2h5aP4JEKFJkVG4LRawnBhRx";
+  process.env.NEXT_PUBLIC_CODE_HASH || "DGwhd93GKEFkozGiNxFqqusx5fTXMQ9qrwMeErnoUGrx";
 export const SOURCE_REPO = "https://github.com/omkardongre/Earmark";
