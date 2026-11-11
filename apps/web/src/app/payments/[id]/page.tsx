@@ -8,7 +8,7 @@ import { Card, ExternalLink, Person, Pill } from "@/components/ui";
 import { proposalUrl, txUrl } from "@/lib/config";
 import { loadBase, requestEvents } from "@/lib/data";
 import { duration, money, STATUS, shortName } from "@/lib/format";
-import { getRequest } from "@/lib/near";
+import { getProposal, getRequest } from "@/lib/near";
 import type { SpendRequest } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +44,13 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
   ).toString();
   const next = nextStep(r, expiresNs, Number(b.pending_ttl_secs));
   const paid = r.status === "paid" || r.status === "paid_by_dao";
+  // "Check the DAO result" only once the vote is over; while it's open there's nothing to check.
+  const voteOpen =
+    r.status === "escalated" && r.dao_proposal_id !== null
+      ? await getProposal(base.config.dao_id, Number(r.dao_proposal_id))
+          .then((p) => p.status === "InProgress")
+          .catch(() => false)
+      : false;
   // The receipt names the payout itself: the transaction that moved the money.
   const payout = events?.findLast((e) => e.event === "spend_paid");
 
@@ -71,7 +78,7 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
             to <Person id={r.payee} /> · asked by <Person id={r.spender} />
           </p>
           {next && <p className="rounded-xl bg-amber-50 px-4 py-3 text-amber-900">{next}</p>}
-          {r.status === "escalated" && r.dao_proposal_id !== null && (
+          {r.status === "escalated" && r.dao_proposal_id !== null && !voteOpen && (
             <SettleButton requestId={id} />
           )}
           {r.status === "dao_funded" && (
@@ -153,7 +160,12 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
 
       <Card className="p-6">
         <h2 className="mb-4 font-semibold">Steps</h2>
-        <PaymentSteps id={id} payee={r.payee} first={events} />
+        <PaymentSteps
+          id={id}
+          payee={r.payee}
+          first={events}
+          paidByDao={r.status === "paid_by_dao"}
+        />
       </Card>
     </div>
   );

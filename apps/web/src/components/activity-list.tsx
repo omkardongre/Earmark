@@ -74,6 +74,26 @@ export function ActivityList({
     return () => window.removeEventListener(CHANGED, onChange);
   }, [fetchPage]);
 
+  // The history API sometimes fails once and works a moment later: try once more by itself.
+  const [retrying, setRetrying] = useState(!first.loaded);
+  useEffect(() => {
+    if (!retrying) return;
+    const t = setTimeout(async () => {
+      try {
+        const page = await fetchPage();
+        if (page.loaded) {
+          setItems(page.items);
+          setNext(page.next);
+        }
+      } catch {
+        // Fall through to the message below.
+      }
+      setRetrying(false);
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [retrying, fetchPage]);
+
+  if (retrying && items.length === 0) return <Empty>Loading activity…</Empty>;
   if (!first.loaded && items.length === 0)
     return <Empty>Activity can’t be loaded right now. The numbers above are live.</Empty>;
   if (items.length === 0 && !next) return <Empty>{empty}</Empty>;

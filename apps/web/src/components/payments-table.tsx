@@ -122,7 +122,7 @@ export function PaymentsTable({
       <Card>
         <div className="hidden grid-cols-[1fr_7rem_8rem_8.5rem] gap-4 border-b border-line px-5 py-2.5 text-sm font-medium text-muted sm:grid">
           <span>Payee</span>
-          <span>When</span>
+          <span>Asked</span>
           <span className="text-right">Amount</span>
           <span className="text-right">Status</span>
         </div>

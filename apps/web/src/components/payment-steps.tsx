@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { txUrl } from "@/lib/config";
 import { ago, shortName } from "@/lib/format";
 import type { EarmarkEvent } from "@/lib/near";
+import { LocalTime } from "./local-time";
 import { ExternalLink } from "./ui";
 
 /** Tries while the history indexer catches up with a payment made seconds ago (about 15 s). */
@@ -15,10 +16,13 @@ export function PaymentSteps({
   id,
   payee,
   first,
+  paidByDao = false,
 }: {
   id: string;
   payee: string;
   first: EarmarkEvent[] | null;
+  /** The DAO paid the payee directly (proposals before R22 log no `spend_paid`). */
+  paidByDao?: boolean;
 }) {
   const [events, setEvents] = useState(first);
   const [tries, setTries] = useState(0);
@@ -41,17 +45,28 @@ export function PaymentSteps({
   if (events && events.length > 0) {
     return (
       <ol className="space-y-4">
-        {events.map((e) => (
-          <li key={`${e.tx}-${e.event}`} className="flex gap-3">
-            <span className="mt-1.5 size-2.5 shrink-0 rounded-full bg-brand" aria-hidden />
-            <div className="min-w-0 flex-1">
-              <p>{step(e, payee)}</p>
-              <p className="text-sm text-muted">
-                {ago(e.timestampNs)} · <ExternalLink href={txUrl(e.tx)}>Transaction</ExternalLink>
-              </p>
-            </div>
-          </li>
-        ))}
+        {events.map((e) => {
+          const direct = paidByDao && !events.some((x) => x.event === "spend_paid");
+          return (
+            <li key={`${e.tx}-${e.event}`} className="flex gap-3">
+              <span className="mt-1.5 size-2.5 shrink-0 rounded-full bg-brand" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p>
+                  {direct && e.event === "escalation_settled"
+                    ? `The DAO paid ${shortName(payee)}`
+                    : step(e, payee)}
+                </p>
+                <p className="text-sm text-muted">
+                  <span className="print:hidden">{ago(e.timestampNs)}</span>
+                  <span className="hidden print:inline">
+                    <LocalTime ns={e.timestampNs} />
+                  </span>{" "}
+                  · <ExternalLink href={txUrl(e.tx)}>Transaction</ExternalLink>
+                </p>
+              </div>
+            </li>
+          );
+        })}
       </ol>
     );
   }

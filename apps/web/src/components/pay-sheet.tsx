@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { CONTRACT, txUrl } from "@/lib/config";
+import { CONTRACT } from "@/lib/config";
 import { BLOCKED, shortName, toBase } from "@/lib/format";
 import { view } from "@/lib/near";
 import type { PayPrefill } from "@/lib/request-link";
 import { isAccountId, nearAmount, storageBalanceOf, storageBounds } from "@/lib/token";
 import type { BlockReason, RequestStatus, Tier, TokenMeta } from "@/lib/types";
-import { Avatar, Button, ButtonLink, ExternalLink, Pill } from "./ui";
+import { Avatar, Button, ButtonLink, Pill } from "./ui";
 import { useWallet } from "./wallet";
 
 type Check = { tier: Tier | null; blocked: BlockReason | null };
@@ -30,7 +30,7 @@ const TIER: Record<
   },
   escalate: {
     label: "Goes to a DAO vote",
-    hint: "Too big for this budget’s rules, so the DAO votes on it.",
+    hint: "Too big for this budget, so the DAO votes. The treasury pays it, not the budget.",
     tone: "blue",
     button: () => "Send to DAO vote",
   },
@@ -246,9 +246,6 @@ export function PaySheet({
                 Done
               </Button>
             </div>
-            <ExternalLink href={txUrl(done.tx)} className="text-sm">
-              Transaction
-            </ExternalLink>
           </div>
         ) : (
           <form method="dialog" className="space-y-5 p-6" onSubmit={(e) => e.preventDefault()}>
@@ -301,8 +298,8 @@ export function PaySheet({
                 </Field>
 
                 <details open={memo !== ""}>
-                  <summary className="text-sm font-medium text-muted hover:text-ink">
-                    Add a note
+                  <summary className="cursor-pointer list-none text-sm font-medium text-brand hover:underline [&::-webkit-details-marker]:hidden">
+                    + Add a note
                   </summary>
                   <input
                     className={`${input} mt-2`}
@@ -364,8 +361,11 @@ export function PaySheet({
                   {tier && (
                     // The wallet screen only shows the contract, so say here what it signs.
                     <p className="text-center text-sm text-muted">
-                      Your wallet will ask you to confirm {amountText} to{" "}
-                      <span className="break-all font-medium text-ink">{payee}</span>.
+                      {check?.tier === "auto"
+                        ? `Your wallet confirms ${amountText} to ${shortName(payee)}.`
+                        : check?.tier === "one_approver"
+                          ? `Your wallet signs the request. ${shortName(payee)} is paid when an approver says yes.`
+                          : `Your wallet signs the request. ${shortName(payee)} is paid if the DAO votes yes.`}
                     </p>
                   )}
                 </div>
