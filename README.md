@@ -223,10 +223,10 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 |---|---|
 | DAO (FunctionCall proposal) | `create_envelope`, `update_envelope` (any rule change), `close_envelope`, `return_escalation` (take back the money held for a payout that keeps failing), `delete_contract` (retire Earmark: deletes the contract account and sends its NEAR to the DAO); `upgrade` (new code, `UpgradeRemote` proposal); funds a budget with a Transfer proposal with `msg` (`ft_transfer_call`) |
 | Spender (or its agent key) | `request_spend`; tasks: `post_task`, `accept_task` (the lead who posted it), `reject_work`, `cancel_task` |
-| Approver | `approve`, `reject`, `override_duplicate`, `approve_payee`, `remove_payee`, `raise_limit`, `lower_limit`, `pause`, `unpause`, `cancel_change`; tasks: `reject_work`, `cancel_task` |
+| Approver | `approve`, `reject`, `override_duplicate`, `approve_payee`, `approve_intents_payee` (near.com), `remove_payee`, `raise_limit`, `lower_limit`, `pause`, `unpause`, `cancel_change`; tasks: `reject_work`, `cancel_task` |
 | Approved payee (not a lead or approver of that budget) | `claim_task`, `submit_work`, `release_claim` |
 | DAO | also `set_task_rules` (trusted contributors on or off, and what earns it) |
-| Anyone | `expire`, `apply_change`, `settle_escalation`, `release_claim` after the claim's deadline, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `get_payee_record`, `eligible`, `list_queued`, `get_change`, `list_tasks`, `get_task`, `get_task_rules`, `get_contributor_trust`, `check_accept`) |
+| Anyone | `expire`, `apply_change`, `settle_escalation`, `release_claim` after the claim's deadline, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `get_payee_record`, `eligible`, `list_queued`, `get_change`, `list_tasks`, `get_task`, `get_task_rules`, `get_contributor_trust`, `check_accept`, `list_intents_payees`, `is_intents_request`) |
 
 ### Tasks (bounties) and trusted contributors
 
@@ -237,6 +237,18 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 - **Accept:** the lead who posted it accepts. The reservation is freed and the payment is made as a normal request `task-<id>-<attempt>` in the lead's name, with every rule checked again and the usual tier. The payment page, receipt, CSV and records work unchanged. If the payment fails, is rejected by an approver or expires, the task goes back to "work sent" with its money reserved again (or is cancelled if the budget closed or the money is gone). Closing a budget cancels its open tasks.
 - **Reject:** the lead or an approver sends the work back to fix, or rejects it as not acceptable (spam, copied, not done), which reopens the task and is a strike against the contributor in that budget.
 - **Trusted contributors** (`set_task_rules`, off by default): after `min_tasks` accepted, paid tasks in a budget, over `min_days`, with no strike in `strike_days`, a contributor is trusted there. The lead still accepts every payment; trust only removes the approver: payments to them clear at once (tier `trusted`) up to `trusted_limit`, which can't exceed the one-approval limit. Trust counts only tasks a lead accepted and that were paid, never on failure. No payment ever happens because nobody objected.
+
+### near.com payees (NEAR Intents)
+
+**Built 11–12 Nov, not committed or installed yet** (testnet dry run on a throwaway contract only; mainnet waits for the one combined upgrade with tasks). Research: `research/solution-research/19-intents-receiving-verified-2026-11-11.md`.
+
+- **What it is:** an approver adds a payee as "near.com (any wallet)" (`approve_intents_payee`, same waiting period as any new payee). Earmark pays them with `ft_transfer_call` to the Intents contract with `msg` = their account id and nothing else, so it lands in their near.com balance. They withdraw on near.com with the same wallet (MetaMask, Phantom, passkey or a NEAR wallet) to Base or any other chain. A MetaMask user's id is their `0x…` address, lowercase. No token setup is needed for them.
+- **Paid only on full credit:** the payment counts as paid only when the token reports the full amount was kept (`ft_resolve_transfer`). A refund (Intents paused, bad id) fails it like any failed transfer: the money stays in the budget and the work link is free again. Earmark never sends Intents actions, so the Oct 2026 refund exploit (it needed a notify action) doesn't apply.
+- **Kept per payment:** whether a request goes to near.com is fixed when it's made (`is_intents_request`). Removing or re-adding the payee doesn't redirect it. To switch a payee's destination, remove and add them again (the new destination waits like a new payee).
+- **Where:** `intents_contract` is `intents.near` for a `.near` contract (set by `migrate`, shown in `get_config`) and none elsewhere, because Intents has no testnet. A test deploy can name its own copy in `new`.
+- **DAO votes:** the gas left inside a Trezu vote (~28 Tgas) isn't enough for this payout, so a near.com payee's DAO-funded request waits as `dao_funded` and `settle_escalation` pays it ("Pay it out" button).
+- **App:** "Where they get paid" choice in Add payee (only when the contract can pay near.com), a near.com tag on payees, and on the payment page "Paid into X's near.com balance", the live balance there and "Withdraw on near.com". Earmark's part ends at the credit; it doesn't track the withdrawal.
+- **Gas, measured on testnet** (Intents copy): a payout at once burnt 16.3 Tgas in total and an approval 15.8 Tgas; the app's 100 Tgas covers both.
 
 Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued for `loosen_delay_secs` (120 s on testnet) and any approver or the DAO can cancel them. Changes that tighten apply at once. `apply_change` refuses a queued change older than 14 days.
 
@@ -327,6 +339,7 @@ In [`scripts/testnet`](scripts/testnet):
 - `demo.ts setup|history|close` creates the demo DAO, contract and budget, seeds the earlier payouts and refusals, and records each tx in `fixtures/`.
 - `lock.ts` installs a new wasm through a DAO `UpgradeRemote` vote by the fixture's Admin members, records the code hash in the fixture and deletes the contract's keys.
 - `settle.ts [request_id]` records the DAO's decision on escalated requests.
+- `intents.ts setup|flow|delete` dry-runs near.com payouts on a throwaway contract (`intents-dev.earmark.testnet`) paying into a copy of the real Intents code (`earmark-intents-a.testnet`, fresh state): add a `0x…` payee, pay at once, pay after an approval, then pause the copy and see the payment fail with the money kept.
 - `tasks.ts setup|flow|delete` dry-runs tasks on a throwaway contract (`tasks-dev.earmark.testnet`, the owner account acts as the DAO): post, claim, send work, accept, then a trusted contributor paid without an approver. Not the demo contracts.
 
 ### Mainnet code update
@@ -345,7 +358,7 @@ Rehearse first on a copy of the real mainnet state: `cargo test --test sandbox -
 
 ### Tests
 
-`mainnet_upgrade_rehearsal` (sandbox, ignored by default) replays the mainnet code update on a copy of the live state. `check_spend_agrees_with_request_spend` runs 15 starting states × 8 amounts and asserts the view predicts exactly what `request_spend` does (tier or reason code). One difference stays by design: an unknown budget id is `closed` in the view and `unknown_envelope` in the call. See [Invariants](#invariants) for the rest.
+`intents_payout` (sandbox, ignored by default, needs internet) runs a near.com payout against mainnet `intents.near`'s real code: paid at 100 Tgas, then refunded and failed cleanly while Intents is paused. `mainnet_upgrade_rehearsal` (sandbox, ignored by default) replays the mainnet code update on a copy of the live state. `check_spend_agrees_with_request_spend` runs 15 starting states × 8 amounts and asserts the view predicts exactly what `request_spend` does (tier or reason code). One difference stays by design: an unknown budget id is `closed` in the view and `unknown_envelope` in the call. See [Invariants](#invariants) for the rest.
 
 ### CI
 
