@@ -35,6 +35,15 @@ pub enum Event<'a> {
         payee: &'a AccountId,
         amount: U128,
     },
+    /// Feature 3: the payment went into the payee's near.com balance on `intents_contract`
+    /// (with `spend_paid`). Withdrawing it from near.com is the payee's own step.
+    #[event_version("1.0.0")]
+    PaidToIntents {
+        request_id: &'a str,
+        payee: &'a AccountId,
+        amount: U128,
+        intents_contract: &'a AccountId,
+    },
     #[event_version("1.0.0")]
     SpendFailed {
         request_id: &'a str,

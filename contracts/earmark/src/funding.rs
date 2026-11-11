@@ -118,7 +118,7 @@ impl Contract {
         .emit();
         request.status = RequestStatus::DaoFunded;
         self.requests.insert(request_id.to_owned(), request.clone());
-        if self.gas_left_for_dao_payout() {
+        if self.gas_left_for_dao_payout(request_id) {
             self.pay_from_dao(token_id, request_id, request).detach();
         }
         Ok(())

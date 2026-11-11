@@ -10,6 +10,7 @@ use near_sdk::{
 
 use crate::envelope::MAX_PENDING;
 use crate::events::Event;
+use crate::intents::GAS_ON_INTENTS_PAID;
 use crate::request::{
     BlockReason, MAX_OPEN_ESCALATIONS, MAX_REQUESTS_PER_PERIOD, PayeeRecord, Record, Request,
     RequestCount, RequestStatus, SpendCheck, Tier, escalation_description, override_key,
@@ -28,6 +29,8 @@ const GAS_ON_SETTLE: Gas = Gas::from_tgas(15);
 const GAS_ON_DAO_PAYOUT: Gas = Gas::from_tgas(8);
 /// Kept free in `ft_on_transfer` before it pays out the DAO's money in the same transaction.
 const GAS_DAO_PAYOUT_MARGIN: Gas = Gas::from_tgas(4);
+/// A payout to a NEAR account and its callback.
+pub(crate) const GAS_PAYOUT: Gas = Gas::from_tgas(18);
 /// R22: blocks after the approving vote before `settle_escalation` trusts a proposal that is
 /// still `Approved` (Sputnik runs the transfer a block or two after the vote, and turns the
 /// proposal `Failed` if it fails). About 11 s.
@@ -220,6 +223,10 @@ impl Contract {
             .requests
             .push(request_id.clone());
         self.requests.insert(request_id.clone(), request);
+        // Snapshot: the payment goes where the payee was set to be paid when it was asked for.
+        if self.is_intents_payee(id, &payee) {
+            self.intents_requests.insert(request_id.clone());
+        }
         match tier {
             Tier::Auto | Tier::Trusted => self
                 .pay(&token_id, &request_id, &payee, amount, memo)
@@ -410,33 +417,11 @@ impl Contract {
         request_id: String,
         #[callback_result] result: Result<(), PromiseError>,
     ) -> RequestStatus {
-        let mut request = self.requests.get(&request_id).cloned().unwrap();
+        let request = self.requests.get(&request_id).cloned().unwrap();
         if request.status != RequestStatus::Paying {
             return request.status;
         }
-        if result.is_ok() {
-            self.free_escalation_slot(&request);
-            self.count_payment(&request);
-            Event::SpendPaid {
-                request_id: &request_id,
-                payee: &request.payee,
-                amount: request.amount,
-            }
-            .emit();
-            request.status = RequestStatus::PaidByDao;
-            request.failure = None;
-            self.task_settled(&request_id, &request, true);
-        } else {
-            Event::DaoPayoutFailed {
-                request_id: &request_id,
-            }
-            .emit();
-            request.status = RequestStatus::DaoFunded;
-            request.failure = Some("payout_failed".to_owned());
-        }
-        let status = request.status;
-        self.requests.insert(request_id, request);
-        status
+        self.finish_dao_payout(&request_id, request, result.is_ok())
     }
 
     /// DAO only, through a `FunctionCall` proposal (R22). Sends the money held for a
@@ -708,6 +693,35 @@ impl Contract {
         Ok(tier)
     }
 
+    /// Ends a payout of the DAO's money: `paid_by_dao`, or back to `dao_funded` for a retry.
+    pub(crate) fn finish_dao_payout(
+        &mut self,
+        request_id: &str,
+        mut request: Request,
+        ok: bool,
+    ) -> RequestStatus {
+        if ok {
+            self.free_escalation_slot(&request);
+            self.count_payment(&request);
+            Event::SpendPaid {
+                request_id,
+                payee: &request.payee,
+                amount: request.amount,
+            }
+            .emit();
+            request.status = RequestStatus::PaidByDao;
+            request.failure = None;
+            self.task_settled(request_id, &request, true);
+        } else {
+            Event::DaoPayoutFailed { request_id }.emit();
+            request.status = RequestStatus::DaoFunded;
+            request.failure = Some("payout_failed".to_owned());
+        }
+        let status = request.status;
+        self.requests.insert(request_id.to_owned(), request);
+        status
+    }
+
     pub(crate) fn pay(
         &self,
         token_id: &AccountId,
@@ -716,6 +730,13 @@ impl Contract {
         amount: U128,
         memo: String,
     ) -> Promise {
+        if self.intents_requests.contains(request_id) {
+            return self.deposit_to_intents(token_id, payee, amount, memo).then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_ON_INTENTS_PAID)
+                    .on_paid_intents(request_id.to_owned()),
+            );
+        }
         ext_ft_core::ext(token_id.clone())
             .with_attached_deposit(ONE_YOCTO)
             .with_static_gas(GAS_FT_TRANSFER)
@@ -739,10 +760,20 @@ impl Contract {
         let amount = request.amount;
         request.status = RequestStatus::Paying;
         self.requests.insert(request_id.to_owned(), request);
+        let memo = format!("earmark {request_id}");
+        if self.intents_requests.contains(request_id) {
+            return self
+                .deposit_to_intents(token_id, &payee, amount, memo)
+                .then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(GAS_ON_INTENTS_PAID)
+                        .on_dao_payout_intents(request_id.to_owned()),
+                );
+        }
         ext_ft_core::ext(token_id.clone())
             .with_attached_deposit(ONE_YOCTO)
             .with_static_gas(GAS_FT_TRANSFER)
-            .ft_transfer(payee, amount, Some(format!("earmark {request_id}")))
+            .ft_transfer(payee, amount, Some(memo))
             .then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(GAS_ON_DAO_PAYOUT)
@@ -750,12 +781,13 @@ impl Contract {
             )
     }
 
-    /// Whether this call can still schedule `pay_from_dao` and finish. A DAO vote from Trezu
-    /// leaves `ft_on_transfer` about 28 Tgas (measured on mainnet, 9 Nov).
-    pub(crate) fn gas_left_for_dao_payout(&self) -> bool {
+    /// Whether this call can still schedule `pay_from_dao` for `request_id` and finish. A DAO
+    /// vote from Trezu leaves `ft_on_transfer` about 28 Tgas (measured on mainnet, 9 Nov): enough
+    /// for a NEAR account, never for near.com, which then waits for `settle_escalation`.
+    pub(crate) fn gas_left_for_dao_payout(&self, request_id: &str) -> bool {
         let left = env::prepaid_gas().saturating_sub(env::used_gas());
-        left >= GAS_FT_TRANSFER
-            .saturating_add(GAS_ON_DAO_PAYOUT)
+        left >= self
+            .payout_gas(request_id)
             .saturating_add(GAS_DAO_PAYOUT_MARGIN)
     }
 

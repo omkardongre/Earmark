@@ -62,6 +62,11 @@ pub enum Change {
     Unpause {
         spender: Option<AccountId>,
     },
+    /// Like `AddPayee`, but the payee is paid into their near.com balance (NEAR Intents) instead
+    /// of their NEAR account. `RemovePayee` removes either kind.
+    AddIntentsPayee {
+        payee: AccountId,
+    },
 }
 
 impl Change {
@@ -82,6 +87,7 @@ impl Change {
         matches!(
             self,
             Self::AddPayee { .. }
+                | Self::AddIntentsPayee { .. }
                 | Self::RemovePayee { .. }
                 | Self::SpenderAutoLimit { .. }
                 | Self::Pause { .. }
@@ -156,6 +162,15 @@ impl Contract {
         id.unwrap()
     }
 
+    /// Approver or DAO. Queued like `approve_payee`; once applied, the payee is paid into their
+    /// near.com balance. To change how a payee is paid, remove them and add them again (so a
+    /// new destination always waits like a new payee).
+    pub fn approve_intents_payee(&mut self, envelope_id: U64, payee: AccountId) -> U64 {
+        require!(self.intents_contract.is_some(), "intents_not_available");
+        let change = Change::AddIntentsPayee { payee };
+        self.submit(envelope_id.0, change, Some(true)).unwrap()
+    }
+
     /// Approver or DAO. Instant; also cancels a queued add of the same payee.
     pub fn remove_payee(&mut self, envelope_id: U64, payee: AccountId) {
         self.submit(envelope_id.0, Change::RemovePayee { payee }, Some(false));
@@ -222,6 +237,7 @@ impl Contract {
             .get_mut(&id)
             .unwrap()
             .apply(&queued.change, now);
+        self.apply_payout_mode(id, &queued.change);
         Event::ChangeApplied {
             change_id: Some(change_id),
             envelope_id: queued.envelope_id,
@@ -293,6 +309,9 @@ impl Contract {
     ) -> Option<U64> {
         let caller = env::predecessor_account_id();
         let by_dao = caller == self.dao_id;
+        if matches!(change, Change::AddIntentsPayee { .. }) {
+            require!(self.intents_contract.is_some(), "intents_not_available");
+        }
         let envelope = self
             .envelopes
             .get(&envelope_id)
@@ -352,6 +371,7 @@ impl Contract {
                 .get_mut(&envelope_id)
                 .unwrap()
                 .apply(&change, now);
+            self.apply_payout_mode(envelope_id, &change);
             Event::ChangeApplied {
                 change_id: None,
                 envelope_id: U64(envelope_id),
@@ -367,7 +387,7 @@ impl Contract {
         let envelope = self.envelopes.get_mut(&envelope_id).unwrap();
         require!(envelope.open_changes < MAX_OPEN_CHANGES, "too_many_queued");
         envelope.open_changes += 1;
-        if let Change::AddPayee { payee } = &change {
+        if let Change::AddPayee { payee } | Change::AddIntentsPayee { payee } = &change {
             let key = payee_key(envelope_id, payee);
             require!(!self.pending_payees.contains_key(&key), "already_queued");
             self.pending_payees.insert(key, self.next_change_id);
@@ -455,12 +475,26 @@ impl Contract {
         let id = queued.envelope_id.0;
         let envelope = self.envelopes.get_mut(&id).unwrap();
         envelope.open_changes = envelope.open_changes.saturating_sub(1);
-        if let Change::AddPayee { payee } = &queued.change {
+        if let Change::AddPayee { payee } | Change::AddIntentsPayee { payee } = &queued.change {
             self.pending_payees.remove(&payee_key(id, payee));
         }
         queued.status = status;
         self.changes.insert(change_id, queued.clone());
         self.queued_ids.remove(&change_id);
+    }
+
+    /// Keeps the near.com mark in step with the payee list: set by `AddIntentsPayee`, cleared
+    /// by `RemovePayee`. Requests already made keep the mode they were made with.
+    fn apply_payout_mode(&mut self, envelope_id: EnvelopeId, change: &Change) {
+        match change {
+            Change::AddIntentsPayee { payee } => {
+                self.intents_payees.insert(payee_key(envelope_id, payee));
+            }
+            Change::RemovePayee { payee } => {
+                self.intents_payees.remove(&payee_key(envelope_id, payee));
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn payee_pending(&self, envelope_id: EnvelopeId, payee: &AccountId) -> bool {
@@ -469,7 +503,7 @@ impl Contract {
     }
 }
 
-fn payee_key(envelope_id: EnvelopeId, payee: &AccountId) -> CryptoHash {
+pub(crate) fn payee_key(envelope_id: EnvelopeId, payee: &AccountId) -> CryptoHash {
     let mut data = envelope_id.to_le_bytes().to_vec();
     data.extend_from_slice(payee.as_bytes());
     env::sha256_array(&data)
@@ -560,7 +594,7 @@ impl Envelope {
                 }
                 Ok(false)
             }
-            Change::AddPayee { payee } => {
+            Change::AddPayee { payee } | Change::AddIntentsPayee { payee } => {
                 if self.payees.contains(payee) {
                     return Err("duplicate_payee");
                 }
@@ -633,7 +667,7 @@ impl Envelope {
             Change::RemoveApprover { approver } => {
                 self.approvers.remove(approver);
             }
-            Change::AddPayee { payee } => {
+            Change::AddPayee { payee } | Change::AddIntentsPayee { payee } => {
                 self.payees.insert(payee.clone());
             }
             Change::RemovePayee { payee } => {

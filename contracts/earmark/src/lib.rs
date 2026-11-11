@@ -6,12 +6,13 @@ mod close;
 mod envelope;
 mod events;
 mod funding;
+mod intents;
 mod request;
 mod spend;
 mod tasks;
 
 use near_sdk::json_types::{U64, U128};
-use near_sdk::store::{IterableMap, IterableSet, LookupMap};
+use near_sdk::store::{IterableMap, IterableSet, LookupMap, LookupSet};
 use near_sdk::{
     AccountId, BorshStorageKey, CryptoHash, Gas, NearToken, PanicOnDefault, Promise, env, near,
     require,
@@ -64,7 +65,13 @@ pub(crate) enum StorageKey {
     TaskRules,
     Trust,
     TaskRequests,
+    // near.com payouts (Feature 3).
+    IntentsPayees,
+    IntentsRequests,
 }
+
+/// The NEAR Intents contract that holds near.com balances on mainnet.
+const MAINNET_INTENTS: &str = "intents.near";
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
@@ -102,6 +109,74 @@ pub struct Contract {
     trust: LookupMap<CryptoHash, PayeeTrust>,
     /// Payment request id -> the task it pays.
     task_requests: LookupMap<String, u64>,
+    /// Where near.com payees are paid (`intents.near` on mainnet). `None`: near.com payees
+    /// can't be added. Fixed at deploy or upgrade.
+    intents_contract: Option<AccountId>,
+    /// `(envelope, payee)` keys of payees paid into their near.com balance.
+    intents_payees: LookupSet<CryptoHash>,
+    /// Requests whose payee was a near.com payee when the request was made. Paid that way even
+    /// if the payee is removed or re-added later.
+    intents_requests: LookupSet<String>,
+}
+
+/// State layout with tasks, before near.com payouts (testnet since 11 Nov). `migrate` converts
+/// it.
+#[near]
+struct ContractV3 {
+    dao_id: AccountId,
+    token_ids: IterableSet<AccountId>,
+    envelopes: IterableMap<EnvelopeId, Envelope>,
+    next_envelope_id: EnvelopeId,
+    loosen_delay_secs: u64,
+    requests: LookupMap<String, Request>,
+    work_claims: LookupMap<CryptoHash, String>,
+    work_overrides: LookupMap<CryptoHash, ()>,
+    records: LookupMap<AccountId, Record>,
+    eligibility: EligibilityRules,
+    changes: LookupMap<u64, QueuedChange>,
+    queued_ids: IterableSet<u64>,
+    next_change_id: u64,
+    pending_payees: LookupMap<CryptoHash, u64>,
+    payee_records: LookupMap<AccountId, PayeeRecord>,
+    request_counts: LookupMap<CryptoHash, RequestCount>,
+    tasks: LookupMap<u64, Task>,
+    next_task_id: u64,
+    task_lists: LookupMap<EnvelopeId, TaskList>,
+    task_rules: LookupMap<EnvelopeId, TaskRules>,
+    trust: LookupMap<CryptoHash, PayeeTrust>,
+    task_requests: LookupMap<String, u64>,
+}
+
+impl From<ContractV3> for Contract {
+    fn from(old: ContractV3) -> Self {
+        Self {
+            dao_id: old.dao_id,
+            token_ids: old.token_ids,
+            envelopes: old.envelopes,
+            next_envelope_id: old.next_envelope_id,
+            loosen_delay_secs: old.loosen_delay_secs,
+            requests: old.requests,
+            work_claims: old.work_claims,
+            work_overrides: old.work_overrides,
+            records: old.records,
+            eligibility: old.eligibility,
+            changes: old.changes,
+            queued_ids: old.queued_ids,
+            next_change_id: old.next_change_id,
+            pending_payees: old.pending_payees,
+            payee_records: old.payee_records,
+            request_counts: old.request_counts,
+            tasks: old.tasks,
+            next_task_id: old.next_task_id,
+            task_lists: old.task_lists,
+            task_rules: old.task_rules,
+            trust: old.trust,
+            task_requests: old.task_requests,
+            intents_contract: default_intents(),
+            intents_payees: LookupSet::new(StorageKey::IntentsPayees),
+            intents_requests: LookupSet::new(StorageKey::IntentsRequests),
+        }
+    }
 }
 
 /// State layout from R18 to R23 (mainnet `budgets.omkar5.near` and testnet since 7 Nov).
@@ -126,7 +201,7 @@ struct ContractV2 {
     request_counts: LookupMap<CryptoHash, RequestCount>,
 }
 
-impl From<ContractV2> for Contract {
+impl From<ContractV2> for ContractV3 {
     fn from(old: ContractV2) -> Self {
         Self {
             dao_id: old.dao_id,
@@ -204,11 +279,15 @@ pub struct ConfigView {
     pub loosen_delay_secs: U64,
     pub eligibility: EligibilityRules,
     pub envelope_count: U64,
+    /// Where near.com payees are paid; `None` when this contract can't pay them.
+    pub intents_contract: Option<AccountId>,
 }
 
 #[near]
 impl Contract {
-    /// Called once in the deploy transaction, by the contract account itself.
+    /// Called once in the deploy transaction, by the contract account itself. `intents_contract`
+    /// defaults to `intents.near` for a `.near` account and to none elsewhere (NEAR Intents has
+    /// no testnet), so a test deploy can name its own copy.
     #[init]
     #[private]
     pub fn new(
@@ -216,6 +295,7 @@ impl Contract {
         token_ids: Vec<AccountId>,
         loosen_delay_secs: Option<U64>,
         eligibility: Option<EligibilityRules>,
+        intents_contract: Option<AccountId>,
     ) -> Self {
         require!(!token_ids.is_empty(), "no_tokens");
         require!(token_ids.len() <= MAX_TOKENS, "too_many_tokens");
@@ -246,6 +326,9 @@ impl Contract {
             task_rules: LookupMap::new(StorageKey::TaskRules),
             trust: LookupMap::new(StorageKey::Trust),
             task_requests: LookupMap::new(StorageKey::TaskRequests),
+            intents_contract: intents_contract.or_else(default_intents),
+            intents_payees: LookupSet::new(StorageKey::IntentsPayees),
+            intents_requests: LookupSet::new(StorageKey::IntentsRequests),
         }
     }
 
@@ -298,8 +381,8 @@ impl Contract {
     }
 
     /// Runs after `upgrade`. Reads the current layout as is, or converts an older one: before
-    /// tasks (R18–R23), or before R18–R21. Requests, records and claims keep their storage;
-    /// only the root changes.
+    /// near.com payouts (tasks), before tasks (R18–R23), or before R18–R21. Requests, records
+    /// and claims keep their storage; only the root changes.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
@@ -307,11 +390,14 @@ impl Contract {
         if let Ok(current) = borsh::from_slice::<Self>(&raw) {
             return current;
         }
+        if let Ok(v3) = borsh::from_slice::<ContractV3>(&raw) {
+            return v3.into();
+        }
         if let Ok(v2) = borsh::from_slice::<ContractV2>(&raw) {
-            return v2.into();
+            return ContractV3::from(v2).into();
         }
         borsh::from_slice::<ContractV1>(&raw)
-            .map(|v1| ContractV2::from(v1).into())
+            .map(|v1| ContractV3::from(ContractV2::from(v1)).into())
             .unwrap_or_else(|_| env::panic_str("unknown_state_layout"))
     }
 
@@ -322,6 +408,7 @@ impl Contract {
             loosen_delay_secs: U64(self.loosen_delay_secs),
             eligibility: self.eligibility.clone(),
             envelope_count: U64(self.next_envelope_id),
+            intents_contract: self.intents_contract.clone(),
         }
     }
 
@@ -346,6 +433,14 @@ impl Contract {
     pub(crate) fn assert_dao(&self) {
         require!(env::predecessor_account_id() == self.dao_id, "not_dao");
     }
+}
+
+/// `intents.near` for a mainnet (`.near`) contract; none elsewhere.
+fn default_intents() -> Option<AccountId> {
+    env::current_account_id()
+        .as_str()
+        .ends_with(".near")
+        .then(|| MAINNET_INTENTS.parse().unwrap())
 }
 
 /// Requires the attached deposit to cover `bytes` of storage and refunds the excess.
