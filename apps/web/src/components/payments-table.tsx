@@ -186,7 +186,7 @@ export function PaymentsTable({
                     <span className="flex min-w-0 items-center gap-3">
                       <Avatar id={r.payee} />
                       <span className="min-w-0">
-                        <span className="block truncate font-medium">{shortName(r.payee)}</span>
+                        <span className="block font-medium [overflow-wrap:anywhere]">{shortName(r.payee)}</span>
                         <span className="block truncate text-sm text-muted">
                           by {shortName(r.spender)}
                           <span className="sm:hidden"> · {ago(r.created_at_ns)}</span>

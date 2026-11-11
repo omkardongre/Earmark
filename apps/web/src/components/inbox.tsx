@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { CONTRACT } from "@/lib/config";
 import { ago, duration, STATUS, shortName, toBase } from "@/lib/format";
-import { view } from "@/lib/near";
+import { nearComAddress } from "@/lib/intents";
+import { getConfig, view } from "@/lib/near";
 import { isAccountId, nearAmount } from "@/lib/token";
 import type { RequestStatus } from "@/lib/types";
 import { useRegistration } from "./pay-sheet";
@@ -55,6 +56,8 @@ export type InboxBudget = {
   }[];
   /** Who can be paid from this budget now. */
   payees: string[];
+  /** The payees paid into their near.com balance. */
+  nearComPayees: string[];
   spenders: {
     id: string;
     paused: boolean;
@@ -122,6 +125,8 @@ function countdown(ms: number, now: number): string | null {
   return h > 0 ? `${h} h ${m} min` : `${m}:${String(s).padStart(2, "0")}`;
 }
 const nsToMs = (ns: string) => Number(BigInt(ns) / 1_000_000n);
+/** Adding a payee, paid to their NEAR account or to near.com. */
+const isPayeeAdd = (kind: string) => kind === "add_payee" || kind === "add_intents_payee";
 
 export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySecs: number }) {
   const { accountId, connect, call } = useWallet();
@@ -255,8 +260,8 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
   const label = (key: string, idle: string) => (busy === key ? "Confirm in wallet…" : idle);
 
   /** New payees show in the payee list; every other waiting change in "Waiting changes". */
-  const payeeChanges = (b: InboxBudget) => changesOf(b).filter((c) => c.kind === "add_payee");
-  const otherChanges = (b: InboxBudget) => changesOf(b).filter((c) => c.kind !== "add_payee");
+  const payeeChanges = (b: InboxBudget) => changesOf(b).filter((c) => isPayeeAdd(c.kind));
+  const otherChanges = (b: InboxBudget) => changesOf(b).filter((c) => !isPayeeAdd(c.kind));
 
   /** Apply (once the wait is over; the main action) and Cancel for a waiting change. */
   const changeActions = (
@@ -277,7 +282,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
               remember((l) => {
                 l.changesGone.add(c.id);
                 if (c.kind === "unpause") l.paused.set(`${b.id}|${c.spender ?? ""}`, false);
-                if (c.kind === "add_payee" && c.payee) l.payeesAdded.add(`${b.id}|${c.payee}`);
+                if (isPayeeAdd(c.kind) && c.payee) l.payeesAdded.add(`${b.id}|${c.payee}`);
               });
               toast({ ok: true, text: appliedText(c), tx: r.hash });
             }}
@@ -660,8 +665,9 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                     return (
                       <>
                         {current.map((p) => (
-                          <div key={p} className="flex items-center py-1">
+                          <div key={p} className="flex items-center gap-2 py-1">
                             <Person id={p} />
+                            {b.nearComPayees.includes(p) && <Pill tone="blue">near.com</Pill>}
                           </div>
                         ))}
                         {waiting.map((c) => {
@@ -673,6 +679,9 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                             >
                               <span className="flex flex-wrap items-center gap-2">
                                 {c.payee && <Person id={c.payee} />}
+                                {c.kind === "add_intents_payee" && (
+                                  <Pill tone="blue">near.com</Pill>
+                                )}
                                 <span className="tabular text-sm text-muted">
                                   {left ? `can be paid in ${left}` : "ready"}
                                 </span>
@@ -946,7 +955,8 @@ type Run = (
  * Add a payee in one step. A payee the budget's token doesn't know yet (NEP-145) can't receive
  * it, so the same click first pays their one-time token registration (`storage_deposit`), then
  * approves them (`approve_payee`, payable after the waiting period). The wallet asks once per
- * transaction.
+ * transaction. On a contract that can pay near.com, the payee can instead be paid into their
+ * near.com balance (`approve_intents_payee`): any wallet, no token setup.
  */
 function AddPayee({
   budgetId,
@@ -967,10 +977,13 @@ function AddPayee({
   const [value, setValue] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [step, setStep] = useState<"register" | "approve" | null>(null);
-  const payee = value.trim().toLowerCase();
+  // null until read; false when this contract can't pay near.com.
+  const [canNearCom, setCanNearCom] = useState<boolean | null>(null);
+  const [nearCom, setNearCom] = useState(false);
+  const payee = nearCom ? nearComAddress(value) : value.trim().toLowerCase();
   const valid = isAccountId(payee);
-  const { reg } = useRegistration(token, valid ? payee : null);
-  const needsSetup = reg.state === "missing";
+  const { reg } = useRegistration(nearCom ? null : token, valid ? payee : null);
+  const needsSetup = !nearCom && reg.state === "missing";
 
   const add = async () => {
     if (needsSetup && token) {
@@ -986,7 +999,8 @@ function AddPayee({
       }
     }
     setStep("approve");
-    const r = await run("approve_payee", { envelope_id: budgetId, payee });
+    const method = nearCom ? "approve_intents_payee" : "approve_payee";
+    const r = await run(method, { envelope_id: budgetId, payee });
     setStep(null);
     if (!r) return;
     onAdded(payee, r.hash);
@@ -1001,6 +1015,13 @@ function AddPayee({
       .catch(() => {});
   }, [open, token, budgetId]);
 
+  useEffect(() => {
+    if (!open || canNearCom !== null) return;
+    getConfig()
+      .then((c) => setCanNearCom(!!c.intents_contract))
+      .catch(() => setCanNearCom(false));
+  }, [open, canNearCom]);
+
   if (!open) {
     return (
       <Button variant="secondary" onClick={() => setOpen(true)}>
@@ -1008,14 +1029,42 @@ function AddPayee({
       </Button>
     );
   }
-  const checking = valid && (reg.state === "checking" || (token === null && reg.state === "idle"));
+  const checking =
+    !nearCom && valid && (reg.state === "checking" || (token === null && reg.state === "idle"));
   return (
     <div className="space-y-2">
+      {canNearCom && (
+        <fieldset className="flex flex-wrap gap-2 text-sm" disabled={busy}>
+          <legend className="sr-only">Where they get paid</legend>
+          {(
+            [
+              [false, "NEAR account"],
+              [true, "near.com (any wallet)"],
+            ] as const
+          ).map(([v, label]) => (
+            <label
+              key={label}
+              className={`cursor-pointer rounded-full border px-3 py-1.5 ${
+                nearCom === v ? "border-brand bg-brand/10 text-ink" : "border-slate-300 text-muted"
+              }`}
+            >
+              <input
+                type="radio"
+                name={`paid-to-${budgetId}`}
+                className="sr-only"
+                checked={nearCom === v}
+                onChange={() => setNearCom(v)}
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <div className="flex flex-wrap gap-2">
         <input
           className="h-11.5 min-w-0 flex-1 rounded-xl border border-slate-300 px-3.5 outline-none focus:border-brand focus:ring-4 focus:ring-brand/20"
-          placeholder="name.near"
-          aria-label="Payee account"
+          placeholder={nearCom ? "Their near.com address (0x… or name.near)" : "name.near"}
+          aria-label={nearCom ? "Payee near.com address" : "Payee account"}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           autoCapitalize="none"
@@ -1038,7 +1087,11 @@ function AddPayee({
       </div>
       <p className="text-sm text-muted" aria-live="polite">
         {payee && !valid ? (
-          <span className="text-rose-700">That isn’t a NEAR account.</span>
+          <span className="text-rose-700">
+            {nearCom ? "That isn’t a near.com address." : "That isn’t a NEAR account."}
+          </span>
+        ) : nearCom ? (
+          `They withdraw on near.com with the same wallet. Payable after ${delay}.`
         ) : needsSetup ? (
           `${shortName(payee)} also needs a one-time ${symbol} setup (${nearAmount(reg.deposit)}). Your wallet asks twice.`
         ) : (

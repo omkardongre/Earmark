@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CONTRACT } from "@/lib/config";
 import { BLOCKED, shortName, toBase } from "@/lib/format";
+import { listIntentsPayees } from "@/lib/intents";
 import { view } from "@/lib/near";
 import type { PayPrefill } from "@/lib/request-link";
 import { isAccountId, nearAmount, storageBalanceOf, storageBounds } from "@/lib/token";
@@ -97,7 +98,13 @@ export function PaySheet({
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => ({ ...d, [k]: v }));
   const { amount, payee, work, memo } = draft;
   const base = toBase(amount, meta);
-  const { reg, recheck } = useRegistration(token, payee || null);
+  // Payees paid into their near.com balance need no token setup of their own.
+  const [nearCom, setNearCom] = useState<string[]>([]);
+  useEffect(() => {
+    void listIntentsPayees(budgetId).then(setNearCom);
+  }, [budgetId]);
+  const toNearCom = !!payee && nearCom.includes(payee);
+  const { reg, recheck } = useRegistration(token, payee && !toNearCom ? payee : null);
 
   useEffect(() => {
     setCheck(null);
@@ -290,7 +297,12 @@ export function PaySheet({
                   </span>
                 </label>
 
-                <PayeePicker payees={payees} value={payee} onChange={set("payee")} />
+                <PayeePicker
+                  payees={payees}
+                  nearCom={nearCom}
+                  value={payee}
+                  onChange={set("payee")}
+                />
 
                 <Field label="Link to the work" hint="The same work can’t be paid twice.">
                   <input
@@ -368,7 +380,7 @@ export function PaySheet({
                     // The wallet screen only shows the contract, so say here what it signs.
                     <p className="text-center text-sm text-muted">
                       {check?.tier === "auto" || check?.tier === "trusted"
-                        ? `Your wallet confirms ${amountText} to ${shortName(payee)}.`
+                        ? `Your wallet confirms ${amountText} to ${shortName(payee)}${toNearCom ? "’s near.com balance" : ""}.`
                         : check?.tier === "one_approver"
                           ? `Your wallet signs the request. ${shortName(payee)} is paid when an approver says yes.`
                           : `Your wallet signs the request. ${shortName(payee)} is paid if the DAO votes yes.`}
@@ -390,10 +402,13 @@ export function PaySheet({
  */
 function PayeePicker({
   payees,
+  nearCom,
   value,
   onChange,
 }: {
   payees: string[];
+  /** Payees paid into their near.com balance. */
+  nearCom: string[];
   value: string;
   onChange: (v: string) => void;
 }) {
@@ -442,7 +457,10 @@ function PayeePicker({
               />
               <Avatar id={p} />
               <span className="min-w-0">
-                <span className="block font-medium">{shortName(p)}</span>
+                <span className="flex items-center gap-2 font-medium">
+                  {shortName(p)}
+                  {nearCom.includes(p) && <Pill tone="blue">near.com</Pill>}
+                </span>
                 <span className="block break-all text-sm text-muted">{p}</span>
               </span>
             </label>

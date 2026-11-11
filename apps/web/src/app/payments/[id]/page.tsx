@@ -4,10 +4,11 @@ import { LocalTime } from "@/components/local-time";
 import { PaymentSteps } from "@/components/payment-steps";
 import { ReceiptButton } from "@/components/receipt-button";
 import { SettleButton } from "@/components/settle-button";
-import { Card, ExternalLink, Person, Pill } from "@/components/ui";
+import { ButtonLink, Card, ExternalLink, Person, Pill } from "@/components/ui";
 import { proposalUrl, txUrl } from "@/lib/config";
 import { loadBase, requestEvents } from "@/lib/data";
-import { duration, money, STATUS, shortName } from "@/lib/format";
+import { duration, money, payoutReason, STATUS, shortName } from "@/lib/format";
+import { isIntentsRequest, NEAR_COM, nearComBalance } from "@/lib/intents";
 import { getProposal, getRequest } from "@/lib/near";
 import type { SpendRequest } from "@/lib/types";
 
@@ -32,7 +33,12 @@ function ruleText(r: SpendRequest, oneLimit: string): string {
 export default async function PaymentPage({ params }: { params: Promise<{ id: string }> }) {
   const id = decodeURIComponent((await params).id);
   if (!/^[A-Za-z0-9._:-]{1,64}$/.test(id)) notFound();
-  const [r, base, events] = await Promise.all([getRequest(id), loadBase(), requestEvents(id)]);
+  const [r, base, events, toNearCom] = await Promise.all([
+    getRequest(id),
+    loadBase(),
+    requestEvents(id),
+    isIntentsRequest(id),
+  ]);
   if (!r) notFound();
   const b = base.budgets.find((x) => x.id === r.envelope_id);
   const m = base.meta.get(r.envelope_id);
@@ -55,6 +61,12 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
       : false;
   // The receipt names the payout itself: the transaction that moved the money.
   const payout = events?.findLast((e) => e.event === "spend_paid");
+  // near.com: what the payee holds there now (a live read; withdrawals lower it).
+  const intents = base.config.intents_contract;
+  const nearComNow =
+    paid && toNearCom && intents
+      ? await nearComBalance(intents, r.payee, b.token_id).catch(() => null)
+      : null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -77,7 +89,8 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
           <Pill tone={s.tone}>{s.label}</Pill>
           <p className="tabular text-4xl font-bold tracking-tight">{money(r.amount, m)}</p>
           <p className="flex flex-wrap items-center gap-2 text-muted">
-            to <Person id={r.payee} /> · asked by <Person id={r.spender} />
+            to <Person id={r.payee} />
+            {toNearCom && <Pill tone="blue">near.com</Pill>} · asked by <Person id={r.spender} />
           </p>
           {next && <p className="rounded-xl bg-amber-50 px-4 py-3 text-amber-900">{next}</p>}
           {r.status === "escalated" && r.dao_proposal_id !== null && !voteOpen && (
@@ -85,6 +98,18 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
           )}
           {r.status === "dao_funded" && (
             <SettleButton requestId={id} payout={r.failure ? "retry" : "first"} />
+          )}
+          {paid && toNearCom && (
+            <div className="space-y-3 rounded-xl bg-sky-50 px-4 py-3 text-sky-900">
+              <p>
+                Paid into {shortName(r.payee)}’s near.com balance. They withdraw it on near.com with
+                the same wallet, to any chain.
+                {nearComNow !== null && ` Balance there now: ${money(nearComNow, m)}.`}
+              </p>
+              <ButtonLink href={NEAR_COM} variant="secondary" className="print:hidden">
+                Withdraw on near.com
+              </ButtonLink>
+            </div>
           )}
         </div>
 
@@ -142,7 +167,7 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
                       ? "DAO outcome"
                       : "Reason"}
               </dt>
-              <dd>{r.failure.replaceAll("_", " ")}</dd>
+              <dd>{payoutReason(r.failure)}</dd>
             </>
           )}
           {paid && payout && (

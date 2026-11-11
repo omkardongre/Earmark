@@ -10,6 +10,7 @@ import { ACTIVE, TaskList } from "@/components/task-list";
 import { Disclosure, Person, Pill, Section } from "@/components/ui";
 import { loadActivity, loadBase, paidByPayee } from "@/lib/data";
 import { duration, money } from "@/lib/format";
+import { listIntentsPayees } from "@/lib/intents";
 import { listRequests, listTasks } from "@/lib/near";
 import { readPrefill } from "@/lib/request-link";
 
@@ -28,11 +29,12 @@ export default async function BudgetPage({
   const b = base.budgets.find((x) => x.id === id);
   const m = base.meta.get(id);
   if (!b || !m) notFound();
-  const [first, activity, tasks, earned] = await Promise.all([
+  const [first, activity, tasks, earned, nearCom] = await Promise.all([
     listRequests(id, { limit: 10 }),
     loadActivity(base, { budget: id, skipPayments: true }),
     listTasks(id, { limit: 50 }),
     paidByPayee(b),
+    listIntentsPayees(id),
   ]);
   const team = { spenders: b.spenders.map(([a]) => a), approvers: b.approvers, payees: b.payees };
   // Contributors see their own side; the full record is for the team and the public.
@@ -105,7 +107,10 @@ export default async function BudgetPage({
               </Group>
               <Group title="Can be paid">
                 {b.payees.map((p) => (
-                  <Person key={p} id={p} />
+                  <span key={p} className="flex items-center gap-2">
+                    <Person id={p} />
+                    {nearCom.includes(p) && <Pill tone="blue">near.com</Pill>}
+                  </span>
                 ))}
               </Group>
             </div>

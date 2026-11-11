@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { txUrl } from "@/lib/config";
-import { ago, shortName } from "@/lib/format";
+import { ago, payoutReason, shortName } from "@/lib/format";
 import type { EarmarkEvent } from "@/lib/near";
 import { LocalTime } from "./local-time";
 import { ExternalLink } from "./ui";
@@ -95,7 +95,9 @@ function step(e: EarmarkEvent, payee: string): string {
     case "spend_paid":
       return `Paid to ${shortName(payee)}`;
     case "spend_failed":
-      return `Didn’t go through (${str("reason").replaceAll("_", " ")}); nothing was spent`;
+      return `Didn’t go through (${payoutReason(str("reason"))}); nothing was spent`;
+    case "paid_to_intents":
+      return `Credited to ${shortName(payee)}’s near.com balance`;
     case "spend_expired":
       return "Expired without a decision";
     case "escalation_settled":

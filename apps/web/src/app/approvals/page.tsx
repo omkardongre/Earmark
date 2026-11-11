@@ -3,6 +3,7 @@ import { describeChange } from "@/lib/activity";
 import { CONTRACT } from "@/lib/config";
 import { loadBase, loadDecisions, loadPauses, loadRequests } from "@/lib/data";
 import { money } from "@/lib/format";
+import { listIntentsPayees } from "@/lib/intents";
 import { contractTopUp, getRequest, isEligible, listQueued } from "@/lib/near";
 import { nearAmount } from "@/lib/token";
 
@@ -28,11 +29,14 @@ export default async function ApprovalsPage() {
       ...b.spenders.filter(([, l]) => l.paused).map(([a]) => `${b.id}|${a}`),
     ]),
   );
-  const [queued, pauses, decisions, topUp] = await Promise.all([
+  const [queued, pauses, decisions, topUp, nearCom] = await Promise.all([
     listQueued(),
     loadPauses(pausedKeys),
     loadDecisions(),
     contractTopUp().catch(() => null),
+    Promise.all(open.map(async (b) => [b.id, await listIntentsPayees(b.id)] as const)).then(
+      (rows) => new Map(rows),
+    ),
   ]);
   const spenders = [...new Set(open.flatMap((b) => b.spenders.map(([a]) => a)))];
   const eligible = new Map(
@@ -105,6 +109,7 @@ export default async function ApprovalsPage() {
             };
           }),
         payees: b.payees,
+        nearComPayees: nearCom.get(b.id) ?? [],
         spenders: b.spenders.map(([a, l]) => ({
           id: a,
           paused: l.paused,

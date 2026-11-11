@@ -125,12 +125,17 @@ export function ButtonLink({
   onClick?: () => void;
   children: ReactNode;
 }) {
+  const cls = `${base} ${variants[variant]} ${className}`;
+  // Another site (near.com) opens in a new tab.
+  if (/^https?:\/\//.test(href)) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" onClick={onClick} className={cls}>
+        {children}
+      </a>
+    );
+  }
   return (
-    <Link
-      href={href}
-      {...(onClick ? { onClick } : {})}
-      className={`${base} ${variants[variant]} ${className}`}
-    >
+    <Link href={href} {...(onClick ? { onClick } : {})} className={cls}>
       {children}
     </Link>
   );
