@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { CONTRACT, EXPECTED_CODE_HASH, proposalUrl } from "@/lib/config";
 import {
@@ -11,12 +12,11 @@ import {
   upgradeKind,
 } from "@/lib/dao";
 import { type DaoProposal, view, viewAccount } from "@/lib/near";
-import { Button, ButtonLink, Card, ExternalLink, Pill, Skeleton } from "./ui";
+import { Button, Card, ExternalLink, Pill, Skeleton } from "./ui";
 import { useWallet } from "./wallet";
 
 /** Sputnik passes the vote's leftover gas to `upgrade`, which deploys the code and runs `migrate`. */
 const VOTE_TGAS = 300;
-const short = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`;
 
 type Loaded = {
   dao: string;
@@ -49,6 +49,8 @@ export function CodeUpdate() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  // Set when this page's own approval installed the code, for the success line.
+  const [updated, setUpdated] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -113,6 +115,7 @@ export function CodeUpdate() {
           );
     setBusy(false);
     if (!r.ok) setSendError(r.error);
+    else if (step === "approve") setUpdated(true);
     await load();
   }
 
@@ -130,27 +133,21 @@ export function CodeUpdate() {
         <div>
           <p className="font-semibold">Earmark contract</p>
           <p className="text-sm text-muted">
-            Runs <span className="tabular">{short(running)}</span>
-            {!done && (
-              <>
-                {" "}
-                · new <span className="tabular">{short(hash)}</span>
-              </>
-            )}
+            {done ? "Latest version" : "A newer version is ready"} ·{" "}
+            <Link href="/verify" className="font-medium text-brand hover:underline">
+              Details
+            </Link>
           </p>
         </div>
         <Pill tone={pill.tone}>{pill.text}</Pill>
       </div>
 
       {done && (
-        <div className="space-y-3">
-          <p className="text-muted">
-            The contract runs the latest code. Budgets and payments kept.
-          </p>
-          <ButtonLink href="/verify" variant="secondary">
-            Check it yourself
-          </ButtonLink>
-        </div>
+        <p className={updated ? "font-medium text-emerald-700" : "text-muted"}>
+          {updated
+            ? "Updated. Budgets and payments kept."
+            : "Nothing to do. Only a DAO vote can change this code."}
+        </p>
       )}
 
       {!done && !proposal && !stored && (
@@ -188,7 +185,7 @@ export function CodeUpdate() {
             <Button onClick={connect}>Connect wallet</Button>
           ) : (
             <Button onClick={() => send("file")} disabled={busy || mayFile === false}>
-              {busy ? "Waiting for wallet…" : "Ask the council to update"}
+              {busy ? "Waiting for wallet…" : "Start the update vote"}
             </Button>
           )}
         </div>
@@ -208,7 +205,7 @@ export function CodeUpdate() {
             <Button onClick={connect}>Connect wallet</Button>
           ) : (
             <Button onClick={() => send("approve")} disabled={busy || mayVote === false}>
-              {busy ? "Waiting for wallet…" : "Approve update"}
+              {busy ? "Waiting for wallet…" : "Approve"}
             </Button>
           )}
         </div>

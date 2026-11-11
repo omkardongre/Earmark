@@ -29,6 +29,8 @@ export type CheckRow = {
   id: "keys" | "code" | "upgrades" | "owner" | "balances" | "reserve";
   title: string;
   ok: boolean;
+  /** The chain couldn't be read (e.g. a rate limit): not a failure, just not checked. */
+  unknown?: boolean;
   detail: string;
   evidence: Evidence[];
 };
@@ -68,23 +70,33 @@ const rpcLink = (check: string, label = "RPC answer"): Evidence => ({
 const short = (h: string) => `${h.slice(0, 6)}…${h.slice(-4)}`;
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** Runs one check; a failed read becomes a failed row instead of a broken page. */
+/**
+ * Runs one check. A failed read (rate limit, node down) is tried once more after a short wait;
+ * if it still fails the row says it couldn't be checked, which is not counted as a failure.
+ */
 async function guard(
   row: Pick<CheckRow, "id" | "title">,
   run: () => Promise<Omit<CheckRow, "id" | "title">>,
 ): Promise<CheckRow> {
-  try {
-    return { ...row, ...(await run()) };
-  } catch (e) {
-    return {
-      ...row,
-      ok: false,
-      detail: `Couldn't read this from the chain right now (${errText(e)}). Try again in a minute.`,
-      evidence: [{ label: "Contract on NearBlocks", href: accountUrl(CONTRACT) }],
-    };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return { ...row, ...(await run()) };
+    } catch (e) {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      console.warn(`verify ${row.id}: ${errText(e)}`);
+      return {
+        ...row,
+        ok: false,
+        unknown: true,
+        detail: "Couldn’t check this right now. Try again in a minute.",
+        evidence: [{ label: "Contract on NearBlocks", href: accountUrl(CONTRACT) }],
+      };
+    }
   }
 }
-
 /** Every DAO proposal, oldest first (Sputnik pages by id). Capped so a huge DAO can't stall. */
 async function daoProposals(dao: string, track: (r: Read<unknown>) => void): Promise<Proposal[]> {
   const out: Proposal[] = [];

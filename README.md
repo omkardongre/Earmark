@@ -43,7 +43,7 @@ No wallet needed for any of these steps.
 | Open [`/preview`](https://earmark-878141445235.us-central1.run.app/preview) ("Replay") | NEARWEEK's 14,171 real proposals replayed against two limits you set. The "Blocked" tile shows 121; "How we counted" shows 23 of them approved by the council |
 | Open [`/budgets/0`](https://earmark-878141445235.us-central1.run.app/budgets/0) ("News contributors") | Available, waiting for approval and paid out, and every payment with its transaction. The 120 tUSDC payment to Sofia went to a DAO vote and shows "Paid by DAO"; its payment page links "Proposal #4" (on testnet this opens the DAO on NearBlocks, since Trezu has no testnet) |
 | Open [`/people`](https://earmark-878141445235.us-central1.run.app/people) | Each contributor's paid count and total, each lead's record, limit and raise eligibility, and the council. Every number comes from a contract view |
-| Open [`/verify`](https://earmark-878141445235.us-central1.run.app/verify) ("Check it yourself") | Live, keyless checks: 0 access keys, the code hash matches the recorded build, code changes only by DAO vote, the DAO is the owner, balances add up. Each row links to NearBlocks and the raw RPC answer |
+| Open [`/verify`](https://earmark-878141445235.us-central1.run.app/verify) ("Check it yourself") | Live, keyless checks: 0 access keys, the code hash matches the recorded build, code changes only by DAO vote, the DAO is the owner, balances add up, ready for new payments. Each row has a "Proof" link to NearBlocks and the raw RPC answer |
 | Run `make verify` | The same checks from a terminal, one PASS or FAIL line per check. No keys, no `.env` |
 | Run `make demo` | Replay of the recorded testnet demo (19 steps): payouts at once, one approval, a DAO vote paid by the DAO, and refusals (`payee_not_allowed`, `duplicate_work`, `duplicate_request`, `not_spender`), each with its tx link. No network |
 | Run `make test` | Contract unit tests, including the invariants table below |
@@ -276,7 +276,7 @@ Live, keyless checks of `budgets.earmark.testnet`, the browser version of `make 
 - Balances add up: token held ≥ budgets, balance = available + waiting + paying, paid requests = paid out.
 - Ready for new payments: the contract has at least 0.5 NEAR free for storage. If not, the row (and the Approvals page) says how much NEAR to send it; a lead only sees that payments are paused.
 
-Each row links to NearBlocks and the raw RPC answer (`/verify/rpc/<check>`). The expected DAO and code hash are in [`apps/web/src/lib/config.ts`](apps/web/src/lib/config.ts) (`EXPECTED_DAO`, `EXPECTED_CODE_HASH`; override with `NEXT_PUBLIC_DAO`, `NEXT_PUBLIC_CODE_HASH`). Update them when `lock.ts` installs new code.
+Each row has a "Proof" link that opens its NearBlocks pages and the raw RPC answer (`/verify/rpc/<check>`). A read that fails (e.g. a rate limit) is retried once; if it still fails the row shows "Couldn’t check this right now" in gray and isn't counted as failed. The expected DAO and code hash are in [`apps/web/src/lib/config.ts`](apps/web/src/lib/config.ts) (`EXPECTED_DAO`, `EXPECTED_CODE_HASH`; override with `NEXT_PUBLIC_DAO`, `NEXT_PUBLIC_CODE_HASH`). Update them when `lock.ts` installs new code.
 
 ### Set up a budget (`/setup`)
 
