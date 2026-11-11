@@ -74,3 +74,10 @@ details[open] > summary .chev {
     animation: none;
   }
 }
+
+/* Receipts print on plain white (cards drop their shadow with `print:shadow-none`). */
+@media print {
+  body {
+    background: white;
+  }
+}

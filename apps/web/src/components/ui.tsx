@@ -25,7 +25,9 @@ export function Pill({ tone = "gray", children }: { tone?: Tone; children: React
 
 export function Card({ className = "", children }: { className?: string; children: ReactNode }) {
   return (
-    <div className={`rounded-2xl border border-line bg-white shadow-card ${className}`}>
+    <div
+      className={`rounded-2xl border border-line bg-white shadow-card print:shadow-none ${className}`}
+    >
       {children}
     </div>
   );

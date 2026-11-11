@@ -25,7 +25,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="min-h-dvh font-sans text-[15px] sm:text-base">
         <WalletProvider>
           <ToastProvider>
-            <header className="sticky top-0 z-20 border-b border-line bg-white/90 backdrop-blur">
+            <header className="sticky top-0 z-20 border-b border-line bg-white/90 backdrop-blur print:hidden">
               <div className="mx-auto flex h-16 max-w-5xl items-center gap-6 px-4">
                 <Link
                   href="/"
@@ -47,13 +47,13 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 </div>
               </div>
             </header>
-            <main className="mx-auto max-w-5xl px-4 pb-28 pt-8 sm:pb-16">
-              <div className="mb-6 empty:hidden">
+            <main className="mx-auto max-w-5xl px-4 pb-28 pt-8 sm:pb-16 print:p-0">
+              <div className="mb-6 empty:hidden print:hidden">
                 <StaleNotice />
               </div>
               {children}
             </main>
-            <footer className="mx-auto hidden max-w-5xl px-4 pb-10 text-sm text-subtle sm:block">
+            <footer className="mx-auto hidden max-w-5xl px-4 pb-10 text-sm text-subtle sm:block print:hidden">
               <Link href="/verify" className="hover:text-ink">
                 Check it yourself
               </Link>
@@ -62,7 +62,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 Source
               </a>
             </footer>
-            <NavLinks queue={queue} mobile />
+            <div className="print:hidden">
+              <NavLinks queue={queue} mobile />
+            </div>
           </ToastProvider>
         </WalletProvider>
       </body>
