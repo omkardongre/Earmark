@@ -1,4 +1,4 @@
-import type { BlockReason, RequestStatus, TokenMeta } from "./types";
+import type { BlockReason, RequestStatus, TaskStatus, TokenMeta } from "./types";
 
 /** Token base units -> "12.5". Amounts are always shown in token units, never converted (R15). */
 export function units(amount: string | bigint, meta: TokenMeta): string {
@@ -69,6 +69,18 @@ export const STATUS: Record<
   dao_funded: { label: "DAO approved", tone: "blue" },
 };
 
+export const TASK_STATUS: Record<
+  TaskStatus,
+  { label: string; tone: "green" | "amber" | "blue" | "gray" | "brand" }
+> = {
+  open: { label: "Open", tone: "brand" },
+  claimed: { label: "In progress", tone: "blue" },
+  submitted: { label: "Work sent", tone: "amber" },
+  accepted: { label: "Paying", tone: "blue" },
+  paid: { label: "Paid", tone: "green" },
+  cancelled: { label: "Cancelled", tone: "gray" },
+};
+
 /** Plain-words reason for a blocked payment, with what to do about it. */
 export const BLOCKED: Record<BlockReason, string> = {
   closed: "This budget is closed.",
@@ -114,6 +126,19 @@ export function errorMessage(e: unknown): string {
     expired: "This request expired.",
     no_other_approver: "Each spender needs an approver other than themselves.",
     not_escalated: "This payment isn't waiting for a DAO vote.",
+    over_one_approver_limit: "Tasks can be at most the one-approval limit.",
+    too_many_open_tasks: "This budget has the most open tasks allowed. Finish or cancel one.",
+    not_open: "Someone already took this task.",
+    not_claimed: "This task isn't in progress.",
+    not_claimant: "Only the person working on it can send the work.",
+    not_submitted: "No work has been sent for this task yet.",
+    not_lead: "Only the lead who posted it can accept it.",
+    not_contributor: "Leads and approvers of this budget can't take its tasks.",
+    assigned_to_other: "This task is for someone else.",
+    too_many_claims: "Finish your current task first.",
+    not_allowed: "You can't do this for this task.",
+    not_cancellable: "This task can't be cancelled now.",
+    invalid_reason: "Add a short reason.",
   };
   if (code && known[code]) return known[code];
   if (/reject|cancel|denied|closed by user/i.test(text)) return "Cancelled in your wallet.";

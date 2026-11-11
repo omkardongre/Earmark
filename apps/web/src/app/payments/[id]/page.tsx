@@ -23,6 +23,8 @@ function ruleText(r: SpendRequest, oneLimit: string): string {
       return `One approval: above ${who}’s limit, up to ${oneLimit}`;
     case "escalate":
       return `DAO vote: over ${oneLimit} needs the DAO`;
+    case "trusted":
+      return `Paid at once: ${shortName(r.payee)} is a trusted contributor of this budget`;
   }
 }
 

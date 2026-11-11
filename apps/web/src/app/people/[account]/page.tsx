@@ -5,7 +5,7 @@ import { Avatar, Card, Disclosure, ExternalLink, Pill, Section } from "@/compone
 import { accountUrl } from "@/lib/config";
 import { loadActivity, loadBase } from "@/lib/data";
 import { ago, duration, money, shortName } from "@/lib/format";
-import { getPayeeRecord, getRecord, isEligible } from "@/lib/near";
+import { getPayeeRecord, getRecord, getTrust, isEligible } from "@/lib/near";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +29,14 @@ export default async function PersonPage({ params }: { params: Promise<{ account
     if (b.payees.includes(account)) r.push("Payee");
     return r.length ? [{ b, r }] : [];
   });
+  // Task record per budget where they can be paid (null on a contract without tasks).
+  const trust = new Map(
+    await Promise.all(
+      roles
+        .filter((x) => x.r.includes("Payee"))
+        .map(async ({ b }) => [b.id, await getTrust(b.id, account).catch(() => null)] as const),
+    ),
+  );
   const isSpender = record.paid_count > 0 || roles.some((x) => x.r.includes("Spender"));
   const firstMeta = meta.values().next().value;
   const rules = config.eligibility;
@@ -99,6 +107,17 @@ export default async function PersonPage({ params }: { params: Promise<{ account
                   <span className="font-medium">{b.name}</span>
                   <span className="flex flex-wrap items-center justify-end gap-2 text-sm text-muted">
                     {limits && m && <span>pays at once up to {money(limits.auto_limit, m)}</span>}
+                    {(() => {
+                      const t = trust.get(b.id);
+                      if (!t || !m) return null;
+                      if (t.trusted)
+                        return <Pill tone="green">Trusted up to {money(t.trusted_limit, m)}</Pill>;
+                      return t.record.tasks_paid > 0 ? (
+                        <span>
+                          {t.record.tasks_paid} {t.record.tasks_paid === 1 ? "task" : "tasks"} done
+                        </span>
+                      ) : null;
+                    })()}
                     {r.map((x) => (
                       <Pill key={x} tone="brand">
                         {x}

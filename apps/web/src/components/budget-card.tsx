@@ -28,6 +28,7 @@ export function BudgetCard({
   // (`balance` alone equals `available` when nothing waits, which drew a full bar.)
   const funded = BigInt(b.balance) + BigInt(b.spent_total);
   const leftPct = funded > 0n ? Number((BigInt(b.available) * 100n) / funded) : 0;
+  // Waiting for approval, being paid, or reserved for open tasks.
   const waiting = BigInt(b.committed) + BigInt(b.in_flight);
   return (
     <Card className="space-y-5 p-6">
@@ -66,8 +67,7 @@ export function BudgetCard({
         <p className="tabular text-muted">
           {waiting > 0n && (
             <>
-              <AnimatedNumber value={waiting.toString()} meta={m} /> {m.symbol} waiting for approval
-              ·{" "}
+              <AnimatedNumber value={waiting.toString()} meta={m} /> {m.symbol} set aside ·{" "}
             </>
           )}
           <AnimatedNumber value={b.spent_total} meta={m} /> {m.symbol} paid out

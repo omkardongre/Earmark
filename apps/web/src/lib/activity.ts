@@ -132,7 +132,7 @@ export function activityFeed(
         break;
       case "spend_requested":
         // An instant payment shows once, as "paid".
-        if (str("tier") === "auto") break;
+        if (str("tier") === "auto" || str("tier") === "trusted") break;
         row = {
           text: `${name("spender")} asked to pay ${name("payee")}`,
           amount: amount(str("amount")),
@@ -233,6 +233,13 @@ export function activityFeed(
           text: `${name("by")} cancelled a waiting change`,
           amount: null,
           chip: { label: "Cancelled", tone: "gray" },
+        };
+        break;
+      case "task_posted":
+        row = {
+          text: `${name("lead")} posted a task`,
+          amount: amount(str("amount")),
+          chip: { label: "Task", tone: "blue" },
         };
         break;
       case "envelope_closed":

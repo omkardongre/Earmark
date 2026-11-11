@@ -13,7 +13,10 @@ import type {
   QueuedChange,
   SpenderRecord,
   SpendRequest,
+  Task,
+  TaskRules,
   TokenMeta,
+  TrustView,
 } from "./types";
 
 const toBase64 = (s: string) =>
@@ -214,6 +217,31 @@ export const listQueued = (budget?: string) =>
   view<[string, QueuedChange][]>(CONTRACT, "list_queued", budget ? { envelope_id: budget } : {});
 export const getRequest = (id: string) =>
   view<SpendRequest | null>(CONTRACT, "get_request", { request_id: id });
+
+/**
+ * A contract deployed before tasks has no task methods. Its views fail with "MethodNotFound";
+ * the app then treats tasks as not available instead of failing the page.
+ */
+async function taskView<T>(method: string, args: object): Promise<T | null> {
+  try {
+    return await view<T>(CONTRACT, method, args);
+  } catch (e) {
+    if (/MethodNotFound|MethodResolveError/i.test(String(e))) return null;
+    throw e;
+  }
+}
+/** A budget's tasks, newest first; null if the contract has no tasks yet. */
+export const listTasks = (budget: string, { from = 0, limit = 100 } = {}) =>
+  taskView<[string, Task][]>("list_tasks", {
+    envelope_id: budget,
+    from_index: String(from),
+    limit,
+  });
+export const getTask = (id: string) => taskView<Task | null>("get_task", { task_id: id });
+export const getTaskRules = (budget: string) =>
+  taskView<TaskRules>("get_task_rules", { envelope_id: budget });
+export const getTrust = (budget: string, account: string) =>
+  taskView<TrustView>("get_contributor_trust", { envelope_id: budget, account_id: account });
 
 /** A budget's requests, newest first; `from` skips that many of the newest. */
 export async function listRequests(

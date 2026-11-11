@@ -34,6 +34,12 @@ const TIER: Record<
     tone: "blue",
     button: () => "Send to DAO vote",
   },
+  trusted: {
+    label: "Pays now",
+    hint: "A trusted contributor of this budget, so no approval is needed.",
+    tone: "green",
+    button: (a) => `Pay ${a}`,
+  },
 };
 
 type Done = { status: RequestStatus | null; amount: string; payee: string; id: string; tx: string };
@@ -361,7 +367,7 @@ export function PaySheet({
                   {tier && (
                     // The wallet screen only shows the contract, so say here what it signs.
                     <p className="text-center text-sm text-muted">
-                      {check?.tier === "auto"
+                      {check?.tier === "auto" || check?.tier === "trusted"
                         ? `Your wallet confirms ${amountText} to ${shortName(payee)}.`
                         : check?.tier === "one_approver"
                           ? `Your wallet signs the request. ${shortName(payee)} is paid when an approver says yes.`

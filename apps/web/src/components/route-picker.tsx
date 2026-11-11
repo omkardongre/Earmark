@@ -20,6 +20,11 @@ const TIER: Record<Tier, { label: string; hint: string; tone: Tone }> = {
     tone: "amber",
   },
   escalate: { label: "DAO vote", hint: "Too big for the budget: the DAO decides.", tone: "blue" },
+  trusted: {
+    label: "Pays now",
+    hint: "A trusted contributor: no approval needed up to the budget’s trusted limit.",
+    tone: "green",
+  },
 };
 
 /** Plainer words for a visitor than the lead-facing `BLOCKED` text. */

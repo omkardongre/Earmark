@@ -1,5 +1,6 @@
 // Shapes returned by the Earmark contract views (amounts are token base units as strings).
-export type Tier = "auto" | "one_approver" | "escalate";
+/** `trusted`: paid at once because the payee is a trusted contributor of the budget (tasks). */
+export type Tier = "auto" | "one_approver" | "escalate" | "trusted";
 
 export type BlockReason =
   | "closed"
@@ -117,3 +118,45 @@ export type QueuedChange = {
 };
 
 export type TokenMeta = { symbol: string; decimals: number };
+
+export type TaskStatus = "open" | "claimed" | "submitted" | "accepted" | "paid" | "cancelled";
+
+/** A funded task (bounty): its amount is reserved in the budget from posting. */
+export type Task = {
+  envelope_id: string;
+  lead: string;
+  title: string;
+  brief: string;
+  amount: string;
+  assignee: string | null;
+  claim_days: number;
+  status: TaskStatus;
+  claimant: string | null;
+  claim_ends_ns: string | null;
+  work_ref: string | null;
+  note: string | null;
+  request_id: string | null;
+  attempts: number;
+  created_at_ns: string;
+  reason: string | null;
+};
+
+export type TaskRules = {
+  trusted_limit: string;
+  min_tasks: number;
+  min_days: number;
+  strike_days: number;
+  min_task_amount: string;
+};
+
+/** A contributor's task record in one budget, and whether it makes them trusted there. */
+export type TrustView = {
+  record: {
+    tasks_paid: number;
+    tasks_paid_total: string;
+    first_paid_at_ns: string | null;
+    last_strike_at_ns: string | null;
+  };
+  trusted: boolean;
+  trusted_limit: string;
+};
