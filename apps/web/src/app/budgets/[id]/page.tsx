@@ -4,10 +4,11 @@ import { ActivityList } from "@/components/activity-list";
 import { BudgetCard } from "@/components/budget-card";
 import { PaymentsTable } from "@/components/payments-table";
 import { RequestBanner } from "@/components/request-form";
-import { Disclosure, Person, Pill, Section } from "@/components/ui";
+import { ACTIVE, TaskList } from "@/components/task-list";
+import { Disclosure, Empty, Person, Pill, Section } from "@/components/ui";
 import { loadActivity, loadBase } from "@/lib/data";
 import { duration, money } from "@/lib/format";
-import { listRequests } from "@/lib/near";
+import { listRequests, listTasks } from "@/lib/near";
 import { readPrefill } from "@/lib/request-link";
 
 export const dynamic = "force-dynamic";
@@ -25,10 +26,12 @@ export default async function BudgetPage({
   const b = base.budgets.find((x) => x.id === id);
   const m = base.meta.get(id);
   if (!b || !m) notFound();
-  const [first, activity] = await Promise.all([
+  const [first, activity, tasks] = await Promise.all([
     listRequests(id, { limit: 10 }),
     loadActivity(base, { budget: id, skipPayments: true }),
+    listTasks(id, { limit: 50 }),
   ]);
+  const activeTasks = tasks?.filter(([, t]) => ACTIVE.has(t.status)) ?? [];
   const period = duration(Number(b.period_secs));
   const prefill = b.closed ? null : readPrefill(await searchParams, b.payees, m);
 
@@ -102,6 +105,27 @@ export default async function BudgetPage({
         </div>
 
         <div className="min-w-0 space-y-10 lg:order-1">
+          {tasks && (
+            <Section
+              title="Tasks"
+              action={
+                (tasks.length > 0 || !b.closed) && (
+                  <Link
+                    href={tasks.length ? `/budgets/${id}/tasks` : `/budgets/${id}/tasks/new`}
+                    className="rounded-lg px-3 py-1.5 text-sm font-semibold text-brand hover:bg-brand-soft"
+                  >
+                    {tasks.length ? "All tasks" : "Post a task"}
+                  </Link>
+                )
+              }
+            >
+              {activeTasks.length ? (
+                <TaskList budgetId={id} tasks={activeTasks.slice(0, 3)} meta={m} />
+              ) : (
+                <Empty>No open tasks. Leads post paid tasks; the money is set aside first.</Empty>
+              )}
+            </Section>
+          )}
           <Section
             title="Payments"
             action={
