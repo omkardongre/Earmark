@@ -6,6 +6,8 @@ import { AnimatedNumber } from "./animated-number";
 import { ApproveBadge } from "./approve-badge";
 import { PaySheet } from "./pay-sheet";
 import { AskButton } from "./request-form";
+import { CardTasks, Earned, type OpenTask } from "./role-views";
+import { ForRoles } from "./roles";
 import { ButtonLink, Card, Pill } from "./ui";
 
 /** The one thing a lead checks first: what's left, and a button to pay. */
@@ -15,6 +17,8 @@ export function BudgetCard({
   link = true,
   period,
   prefill = null,
+  earned = {},
+  openTasks = null,
 }: {
   b: Budget;
   m: TokenMeta;
@@ -23,7 +27,12 @@ export function BudgetCard({
   period?: string;
   /** From an "Ask to be paid" link (budget page only). */
   prefill?: PayPrefill | null;
+  /** Paid per payee from this budget, for a contributor's "You earned" line. */
+  earned?: Record<string, string>;
+  /** Open tasks, for the card's way into the task board (home); null hides it. */
+  openTasks?: OpenTask[] | null;
 }) {
+  const team = { spenders: b.spenders.map(([a]) => a), approvers: b.approvers, payees: b.payees };
   // The bar is what's left of everything the budget ever got: held now plus already paid out.
   // (`balance` alone equals `available` when nothing waits, which drew a full bar.)
   const funded = BigInt(b.balance) + BigInt(b.spent_total);
@@ -38,7 +47,7 @@ export function BudgetCard({
             {b.name}
           </Link>
         ) : (
-          <span className="text-lg font-semibold">Available</span>
+          <span className="text-lg font-semibold">Budget left</span>
         )}
         <div className="flex gap-1.5">
           {b.closed && <Pill>Closed</Pill>}
@@ -47,13 +56,14 @@ export function BudgetCard({
         </div>
       </div>
       <div className="space-y-3">
-        <p className="tabular text-4xl font-bold tracking-tight">
-          <AnimatedNumber value={b.available} meta={m} />{" "}
-          <span className="text-lg font-semibold text-muted">{m.symbol}</span>
-          {link && (
-            <span className="ml-2 align-middle text-base font-medium text-muted">available</span>
-          )}
-        </p>
+        {/* The budget's money, the same for everyone: not the signed-in person's balance. */}
+        <div>
+          {link && <p className="text-sm font-medium text-muted">Budget left</p>}
+          <p className="tabular text-4xl font-bold tracking-tight">
+            <AnimatedNumber value={b.available} meta={m} />{" "}
+            <span className="text-lg font-semibold text-muted">{m.symbol}</span>
+          </p>
+        </div>
         <div
           className="h-2 overflow-hidden rounded-full bg-slate-100"
           role="img"
@@ -73,23 +83,27 @@ export function BudgetCard({
           <AnimatedNumber value={b.spent_total} meta={m} /> {m.symbol} paid out
         </p>
         {period && (
-          <p className="tabular text-muted">
-            <AnimatedNumber value={b.period_spent} meta={m} /> of {money(b.period_cap, m)} used this
-            period ({period})
-          </p>
+          <ForRoles team={team} roles={["lead", "approver", "visitor"]}>
+            <p className="tabular text-muted">
+              <AnimatedNumber value={b.period_spent} meta={m} /> of {money(b.period_cap, m)} used
+              this period ({period})
+            </p>
+          </ForRoles>
         )}
       </div>
+      <Earned team={team} earned={earned} meta={m} />
+      {link && openTasks && <CardTasks budgetId={b.id} team={team} open={openTasks} />}
       {!b.closed && (
         <div className="flex flex-wrap gap-2">
           <PaySheet
             budgetId={b.id}
             token={b.token_id}
             payees={b.payees}
-            spenders={b.spenders.map(([a]) => a)}
+            spenders={team.spenders}
             meta={m}
             prefill={prefill}
           />
-          <AskButton budgetId={b.id} payees={b.payees} spenders={b.spenders.map(([a]) => a)} />
+          <AskButton budgetId={b.id} payees={b.payees} spenders={team.spenders} />
           {link && (
             <ButtonLink href={`/budgets/${b.id}`} variant="secondary">
               View budget

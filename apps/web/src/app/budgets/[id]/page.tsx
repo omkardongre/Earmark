@@ -2,11 +2,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/activity-list";
 import { BudgetCard } from "@/components/budget-card";
-import { PaymentsTable } from "@/components/payments-table";
 import { RequestBanner } from "@/components/request-form";
+import { BudgetPayments } from "@/components/role-views";
+import { ForRoles } from "@/components/roles";
+import { TasksEmpty } from "@/components/task-board";
 import { ACTIVE, TaskList } from "@/components/task-list";
-import { Disclosure, Empty, Person, Pill, Section } from "@/components/ui";
-import { loadActivity, loadBase } from "@/lib/data";
+import { Disclosure, Person, Pill, Section } from "@/components/ui";
+import { loadActivity, loadBase, paidByPayee } from "@/lib/data";
 import { duration, money } from "@/lib/format";
 import { listRequests, listTasks } from "@/lib/near";
 import { readPrefill } from "@/lib/request-link";
@@ -26,11 +28,15 @@ export default async function BudgetPage({
   const b = base.budgets.find((x) => x.id === id);
   const m = base.meta.get(id);
   if (!b || !m) notFound();
-  const [first, activity, tasks] = await Promise.all([
+  const [first, activity, tasks, earned] = await Promise.all([
     listRequests(id, { limit: 10 }),
     loadActivity(base, { budget: id, skipPayments: true }),
     listTasks(id, { limit: 50 }),
+    paidByPayee(b),
   ]);
+  const team = { spenders: b.spenders.map(([a]) => a), approvers: b.approvers, payees: b.payees };
+  // Contributors see their own side; the full record is for the team and the public.
+  const notContributor = ["lead", "approver", "visitor"] as const;
   const activeTasks = tasks?.filter(([, t]) => ACTIVE.has(t.status)) ?? [];
   const period = duration(Number(b.period_secs));
   const prefill = b.closed ? null : readPrefill(await searchParams, b.payees, m);
@@ -54,24 +60,26 @@ export default async function BudgetPage({
 
       <div className="grid items-start gap-8 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-4 lg:order-2">
-          <BudgetCard b={b} m={m} link={false} period={period} prefill={prefill} />
-          <Disclosure title="How payments work">
-            <div className="divide-y divide-line">
-              <Rule tone="green" title="Paid at once">
-                Up to each spender’s own limit, to an approved payee.
-              </Rule>
-              <Rule tone="amber" title="One approval">
-                Up to {money(b.one_approver_limit, m)}. Any approver other than the spender.
-              </Rule>
-              <Rule tone="blue" title="DAO vote">
-                Anything larger becomes a normal DAO proposal.
-              </Rule>
-              <Rule tone="gray" title="Rule changes">
-                Loosening waits {duration(Number(base.config.loosen_delay_secs))} and can be
-                cancelled. Tightening and pausing apply at once.
-              </Rule>
-            </div>
-          </Disclosure>
+          <BudgetCard b={b} m={m} link={false} period={period} prefill={prefill} earned={earned} />
+          <ForRoles team={team} roles={[...notContributor]}>
+            <Disclosure title="How payments work">
+              <div className="divide-y divide-line">
+                <Rule tone="green" title="Paid at once">
+                  Up to each spender’s own limit, to an approved payee.
+                </Rule>
+                <Rule tone="amber" title="One approval">
+                  Up to {money(b.one_approver_limit, m)}. Any approver other than the spender.
+                </Rule>
+                <Rule tone="blue" title="DAO vote">
+                  Anything larger becomes a normal DAO proposal.
+                </Rule>
+                <Rule tone="gray" title="Rule changes">
+                  Loosening waits {duration(Number(base.config.loosen_delay_secs))} and can be
+                  cancelled. Tightening and pausing apply at once.
+                </Rule>
+              </div>
+            </Disclosure>
+          </ForRoles>
           <Disclosure
             title="People"
             hint={`${b.spenders.length + b.approvers.length + b.payees.length}`}
@@ -109,12 +117,12 @@ export default async function BudgetPage({
             <Section
               title="Tasks"
               action={
-                (tasks.length > 0 || !b.closed) && (
+                tasks.length > 0 && (
                   <Link
-                    href={tasks.length ? `/budgets/${id}/tasks` : `/budgets/${id}/tasks/new`}
+                    href={`/budgets/${id}/tasks`}
                     className="rounded-lg px-3 py-1.5 text-sm font-semibold text-brand hover:bg-brand-soft"
                   >
-                    {tasks.length ? "All tasks" : "Post a task"}
+                    All tasks
                   </Link>
                 )
               }
@@ -122,35 +130,32 @@ export default async function BudgetPage({
               {activeTasks.length ? (
                 <TaskList budgetId={id} tasks={activeTasks.slice(0, 3)} meta={m} />
               ) : (
-                <Empty>No open tasks. Leads post paid tasks; the money is set aside first.</Empty>
+                <TasksEmpty
+                  budgetId={id}
+                  team={team}
+                  first={tasks.length === 0}
+                  canPost={!b.closed}
+                />
               )}
             </Section>
           )}
-          <Section
-            title="Payments"
-            action={
-              Number(b.request_count) > 0 && (
-                // A plain link: the route handler sends the file as a download.
-                <a
-                  href={`/api/export/${id}`}
-                  download
-                  className="rounded-lg px-3 py-1.5 text-sm font-semibold text-brand hover:bg-brand-soft"
-                >
-                  Download CSV
-                </a>
-              )
-            }
-          >
-            <PaymentsTable budgetId={id} first={first} total={Number(b.request_count)} meta={m} />
-          </Section>
-          <Section title="Other activity">
-            <ActivityList
-              first={activity}
-              budget={id}
-              skipPayments
-              empty="No pauses, funding or rule changes yet."
-            />
-          </Section>
+          <BudgetPayments
+            budgetId={id}
+            team={team}
+            first={first}
+            total={Number(b.request_count)}
+            meta={m}
+          />
+          <ForRoles team={team} roles={[...notContributor]}>
+            <Section title="Other activity">
+              <ActivityList
+                first={activity}
+                budget={id}
+                skipPayments
+                empty="No pauses, funding or rule changes yet."
+              />
+            </Section>
+          </ForRoles>
         </div>
       </div>
     </div>

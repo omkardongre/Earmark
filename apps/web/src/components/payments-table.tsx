@@ -33,20 +33,24 @@ export function PaymentsTable({
   first,
   total,
   meta,
+  payee,
 }: {
   budgetId: string;
   first: [string, SpendRequest][];
   total: number;
   meta: TokenMeta;
+  /** Only payments to this account (a contributor's own); reads all of them at once. */
+  payee?: string;
 }) {
-  const [rows, setRows] = useState(first);
+  const [rows, setRows] = useState(() => (payee ? [] : first));
+  const [loaded, setLoaded] = useState(!payee);
   const [count, setCount] = useState(total);
   const [filter, setFilter] = useState<Filter>("all");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const match = FILTERS.find((f) => f.key === filter)?.match ?? (() => true);
   const visible = rows.filter(([, r]) => match(r.status));
-  const hasMore = rows.length < count;
+  const hasMore = !payee && rows.length < count;
 
   const page = useCallback(
     (from: number) =>
@@ -58,8 +62,42 @@ export function PaymentsTable({
     [budgetId],
   );
 
+  // Own payments only: read every request (100 per call, up to 1,000) and keep the payee's.
+  useEffect(() => {
+    if (!payee) return;
+    let live = true;
+    const load = async () => {
+      try {
+        const b = await view<{ request_count: string } | null>(CONTRACT, "get_envelope", {
+          envelope_id: budgetId,
+        });
+        const n = Math.min(Number(b?.request_count ?? 0), 1000);
+        const pages = await Promise.all(
+          Array.from({ length: Math.ceil(n / 100) }, (_, i) =>
+            view<[string, SpendRequest][]>(CONTRACT, "list_requests", {
+              envelope_id: budgetId,
+              from_index: String(i * 100),
+              limit: 100,
+            }),
+          ),
+        );
+        if (live) setRows(pages.flat().filter(([, r]) => r.payee === payee));
+      } catch {
+        if (live) setFailed(true);
+      } finally {
+        if (live) setLoaded(true);
+      }
+    };
+    void load();
+    window.addEventListener(CHANGED, load);
+    return () => {
+      live = false;
+      window.removeEventListener(CHANGED, load);
+    };
+  }, [payee, budgetId]);
   // After an action, re-read the newest page: new payments go on top, changed statuses update.
   useEffect(() => {
+    if (payee) return;
     const onChange = async () => {
       try {
         const [fresh, b] = await Promise.all([
@@ -79,7 +117,7 @@ export function PaymentsTable({
     };
     window.addEventListener(CHANGED, onChange);
     return () => window.removeEventListener(CHANGED, onChange);
-  }, [page, budgetId]);
+  }, [page, budgetId, payee]);
 
   const more = async () => {
     setBusy(true);
@@ -97,7 +135,12 @@ export function PaymentsTable({
     }
   };
 
-  if (count === 0) return <Empty>No payments yet.</Empty>;
+  if (payee) {
+    if (!loaded) return <Empty>Loading your payments…</Empty>;
+    if (failed && rows.length === 0)
+      return <Empty>Your payments can’t be loaded right now. Try again soon.</Empty>;
+    if (rows.length === 0) return <Empty>No payments to you yet.</Empty>;
+  } else if (count === 0) return <Empty>No payments yet.</Empty>;
 
   return (
     <div className="space-y-3">
