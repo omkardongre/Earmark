@@ -114,6 +114,11 @@ Each row names the test that checks it. Tests are in [`contracts/earmark/src/tes
 | An escalation approved before an upgrade settles exactly once after it | tests.rs::escalation_from_before_the_upgrade_settles_once_after_it |
 | Request 101 in a period: too_many_requests | tests.rs::request_cap_and_storage_float_block_new_requests |
 | Removing the last approver who isn't that spender: refused | tests.rs::cannot_leave_a_spender_as_their_own_only_approver |
+| Task: reserved at posting, paid through the usual tiers on accept, counted for trust only when paid | tests.rs::task_reserves_at_posting_and_pays_through_the_tiers |
+| Trusted contributor: no approver up to the trusted limit, approver above it; a for-cause rejection removes trust | tests.rs::trusted_contributor_skips_the_approver_until_a_strike |
+| Task payment fails: reservation held again; closing the budget cancels the task and frees it | tests.rs::failed_task_payment_holds_again_and_close_cancels |
+| One open claim per contributor; anyone reopens a claim after its deadline | tests.rs::claims_expire_and_one_is_open_at_a_time |
+| Upgrade from the R23 layout keeps everything and adds tasks | tests.rs::tasks_survive_the_upgrade_from_the_r23_layout, sandbox.rs::mainnet_upgrade_rehearsal |
 | Payee record grows when the DAO pays, never on failure | tests.rs::settle_escalation_records_each_dao_outcome, tests.rs::failed_transfer_releases_reservation_and_work |
 
 Not yet tested, or only partly:
@@ -217,9 +222,21 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 | Who | Methods |
 |---|---|
 | DAO (FunctionCall proposal) | `create_envelope`, `update_envelope` (any rule change), `close_envelope`, `return_escalation` (take back the money held for a payout that keeps failing), `delete_contract` (retire Earmark: deletes the contract account and sends its NEAR to the DAO); `upgrade` (new code, `UpgradeRemote` proposal); funds a budget with a Transfer proposal with `msg` (`ft_transfer_call`) |
-| Spender (or its agent key) | `request_spend` |
-| Approver | `approve`, `reject`, `override_duplicate`, `approve_payee`, `remove_payee`, `raise_limit`, `lower_limit`, `pause`, `unpause`, `cancel_change` |
-| Anyone | `expire`, `apply_change`, `settle_escalation`, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `get_payee_record`, `eligible`, `list_queued`, `get_change`) |
+| Spender (or its agent key) | `request_spend`; tasks: `post_task`, `accept_task` (the lead who posted it), `reject_work`, `cancel_task` |
+| Approver | `approve`, `reject`, `override_duplicate`, `approve_payee`, `remove_payee`, `raise_limit`, `lower_limit`, `pause`, `unpause`, `cancel_change`; tasks: `reject_work`, `cancel_task` |
+| Approved payee (not a lead or approver of that budget) | `claim_task`, `submit_work`, `release_claim` |
+| DAO | also `set_task_rules` (trusted contributors on or off, and what earns it) |
+| Anyone | `expire`, `apply_change`, `settle_escalation`, `release_claim` after the claim's deadline, views (`check_spend`, `get_envelope`, `list_requests`, `get_request`, `get_record`, `get_payee_record`, `eligible`, `list_queued`, `get_change`, `list_tasks`, `get_task`, `get_task_rules`, `get_contributor_trust`, `check_accept`) |
+
+### Tasks (bounties) and trusted contributors
+
+Built 11 Nov; not yet installed on the demo contracts (needs a DAO-voted upgrade). Research: `research/solution-research/17-bounty-board-research-2026-11-11.md`.
+
+- **Post:** a lead posts a task (title, brief link, amount, days to finish, optionally "only for" one payee). The amount is reserved in the budget at once (`committed`), so the contributor knows the money is there. A task is at most the one-approval limit; bigger work stays a normal request that goes to a DAO vote. Posting counts toward the lead's 100 requests per period, and a budget holds at most 50 reserved tasks.
+- **Claim and submit:** an approved payee who isn't a lead or approver of that budget claims it (one open claim, three when trusted) and sends a work link. The same work link can't be paid twice for them (`duplicate_work`). After the deadline anyone can reopen the claim.
+- **Accept:** the lead who posted it accepts. The reservation is freed and the payment is made as a normal request `task-<id>-<attempt>` in the lead's name, with every rule checked again and the usual tier. The payment page, receipt, CSV and records work unchanged. If the payment fails, is rejected by an approver or expires, the task goes back to "work sent" with its money reserved again (or is cancelled if the budget closed or the money is gone). Closing a budget cancels its open tasks.
+- **Reject:** the lead or an approver sends the work back to fix, or rejects it as not acceptable (spam, copied, not done), which reopens the task and is a strike against the contributor in that budget.
+- **Trusted contributors** (`set_task_rules`, off by default): after `min_tasks` accepted, paid tasks in a budget, over `min_days`, with no strike in `strike_days`, a contributor is trusted there. The lead still accepts every payment; trust only removes the approver: payments to them clear at once (tier `trusted`) up to `trusted_limit`, which can't exceed the one-approval limit. Trust counts only tasks a lead accepted and that were paid, never on failure. No payment ever happens because nobody objected.
 
 Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued for `loosen_delay_secs` (120 s on testnet) and any approver or the DAO can cancel them. Changes that tighten apply at once. `apply_change` refuses a queued change older than 14 days.
 
@@ -250,6 +267,7 @@ Screens in [`apps/web`](apps/web):
 - **Landing** for signed-out visitors: one line, live counts per payment path with the latest of each, links to Try it and the replay, and a route picker (amount + payee → pays now / one approval / DAO vote / blocked, from the live `check_spend` view, no wallet).
 - **Budgets home** with recent payments: one row per payment showing its latest step, 5 at a time, rule changes left out ("Show more" pages older history through `/api/activity`). People show by name ("Sofia Reyes" for `sofia-reyes.earmark.testnet`); the full account stays in links and the pay sheet.
 - **Ask to be paid** (`/budgets/<id>/request`, no wallet needed): a contributor picks who they are (preset when signed in as a payee), the amount, the work link and a note, and gets a link to send their lead (Copy or Share). The link opens the budget page with a "Writer asks to be paid 0.2 USDC" line and the pay form filled in once a lead signs in; the link leaves the address bar so a reload doesn't reopen it. Nothing is stored: the fields are only suggestions ([`lib/request-link.ts`](apps/web/src/lib/request-link.ts) drops a link whose payee isn't on the budget, whose amount isn't valid, or whose text is over the contract's 256-byte limit), the lead reviews them, and the contract checks every rule. Signed-in payees see an "Ask to be paid" button on the budget card.
+- **Tasks** (`/budgets/<id>/tasks`, `/tasks/new`, `/tasks/<n>`): the board (Open, In progress, Paid) and a task page with one main action for whoever is signed in: "Take this task", "Send the work", "Accept and pay" (with the tier from `check_accept`), "Send back or reject", "Cancel task", "See the receipt". The budget page lists active tasks; a person's page shows "Trusted up to X" per budget. On a contract without tasks the views fail with `MethodNotFound` and the app says tasks aren't available instead of failing.
 - **Receipt**: a paid payment's page has "Download receipt", which opens the browser's print dialog ("Save as PDF"). The print view drops the nav and buttons and adds a "Payment receipt" title, the payout transaction hash and link, and the receipt id. No PDF library or server rendering.
 - **Budget page**: payments table with filters and `list_requests` paging; animated budget numbers (still with reduced motion); CSV export (`/api/export/<id>`: UTC date, request id, payee, exact amount, token, status, work link, tx; cells starting with `= + - @` are quoted against formula injection).
 - **Payment page** `/payments/[id]`: steps, each with its transaction.
@@ -309,6 +327,7 @@ In [`scripts/testnet`](scripts/testnet):
 - `demo.ts setup|history|close` creates the demo DAO, contract and budget, seeds the earlier payouts and refusals, and records each tx in `fixtures/`.
 - `lock.ts` installs a new wasm through a DAO `UpgradeRemote` vote by the fixture's Admin members, records the code hash in the fixture and deletes the contract's keys.
 - `settle.ts [request_id]` records the DAO's decision on escalated requests.
+- `tasks.ts setup|flow|delete` dry-runs tasks on a throwaway contract (`tasks-dev.earmark.testnet`, the owner account acts as the DAO): post, claim, send work, accept, then a trusted contributor paid without an approver. Not the demo contracts.
 
 ### Mainnet code update
 The Admin's key stays in their wallet. [`scripts/mainnet/upgrade.ts`](scripts/mainnet/upgrade.ts) uses a one-time helper account, with its key on this machine only:
