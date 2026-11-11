@@ -21,7 +21,12 @@ export type DaoPolicy = {
 };
 
 /** Sputnik's policy labels for the proposal kinds setup uses. */
-export type KindLabel = "call" | "transfer" | "add_member_to_role" | "policy_add_or_update_role";
+export type KindLabel =
+  | "call"
+  | "transfer"
+  | "add_member_to_role"
+  | "policy_add_or_update_role"
+  | "upgrade_remote";
 
 export const getPolicy = (dao: string) => view<DaoPolicy>(dao, "get_policy");
 
@@ -56,6 +61,10 @@ export function proposeRoles(policy: DaoPolicy, account: string, kind: KindLabel
 
 export const canPropose = (policy: DaoPolicy, account: string, kind: KindLabel) =>
   proposeRoles(policy, account, kind).length > 0;
+
+/** Whether `account` may vote yes on a proposal of this kind. */
+export const canApprove = (policy: DaoPolicy, account: string, kind: KindLabel) =>
+  policy.roles.some((r) => inRole(r, account) && permits(r, kind, "VoteApprove"));
 
 /**
  * Whether the Earmark contract can file escalations in this DAO. An escalation is a `Transfer`
@@ -183,6 +192,11 @@ export function escalationFix(policy: DaoPolicy, contract: string) {
     },
   };
 }
+
+/** The DAO replaces the contract's code with a stored blob; the contract's `upgrade` runs `migrate`. */
+export const upgradeKind = (contract: string, hash: string) => ({
+  UpgradeRemote: { receiver_id: contract, method_name: "upgrade", hash },
+});
 
 /** Sputnik's status for a proposal that ran: `Approved`; `InProgress` while voting. */
 export type ProposalStatus =
