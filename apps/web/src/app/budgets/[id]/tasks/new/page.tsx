@@ -41,6 +41,10 @@ export default async function NewTaskPage({ params }: { params: Promise<{ id: st
             payees={contributors}
             available={b.available}
             maxAmount={b.one_approver_limit}
+            paused={{
+              budget: b.paused,
+              leads: b.spenders.filter(([, l]) => l.paused).map(([a]) => a),
+            }}
             meta={m}
           />
         )}

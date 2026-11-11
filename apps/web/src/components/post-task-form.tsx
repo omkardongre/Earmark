@@ -22,10 +22,13 @@ export function PostTaskForm({
   payees,
   available,
   maxAmount,
+  paused,
   meta,
 }: {
   budgetId: string;
   spenders: string[];
+  /** The budget is paused, or these leads are: posting fails in the contract, so say it first. */
+  paused: { budget: boolean; leads: string[] };
   /** Approved payees who aren't leads or approvers: who a task can be only for. */
   payees: string[];
   available: string;
@@ -52,22 +55,34 @@ export function PostTaskForm({
     );
   if (!spenders.includes(accountId))
     return <p className="text-muted">Only a lead of this budget can post tasks.</p>;
-
+  if (paused.budget || paused.leads.includes(accountId))
+    return (
+      <p className="text-muted">
+        {paused.budget ? "This budget is paused." : "Your payments are paused."} You can post tasks
+        again once an approver unpauses.
+      </p>
+    );
+  // The most a task can be: the one-approval limit, or what's left if that's less.
+  const most = BigInt(maxAmount) < BigInt(available) ? maxAmount : available;
   const base = toBase(amount, meta);
+  // Checked as the lead types, so a wrong amount never reaches the wallet.
+  const amountProblem = !amount.trim()
+    ? null
+    : !base
+      ? "Enter an amount like 5 or 2.5."
+      : BigInt(base) > BigInt(maxAmount)
+        ? `Tasks can be up to ${money(maxAmount, meta)}.`
+        : BigInt(base) > BigInt(available)
+          ? `Only ${money(available, meta)} is left in the budget.`
+          : null;
   const problem = !title.trim()
     ? "Give the task a title."
     : bytes(title.trim()) > MAX_TITLE
       ? "The title is too long."
       : !base
         ? "Enter the amount."
-        : BigInt(base) > BigInt(maxAmount)
-          ? `Tasks can be at most ${money(maxAmount, meta)}.`
-          : BigInt(base) > BigInt(available)
-            ? `Only ${money(available, meta)} is left in the budget.`
-            : bytes(brief.trim()) > MAX_LINK
-              ? "The brief link is too long."
-              : null;
-
+        : (amountProblem ??
+          (bytes(brief.trim()) > MAX_LINK ? "The brief link is too long." : null));
   const post = async () => {
     if (problem || !base) return;
     setBusy(true);
@@ -121,9 +136,15 @@ export function PostTaskForm({
           />
           <span className="text-lg font-semibold text-muted">{meta.symbol}</span>
         </span>
-        <span className="mt-1.5 block text-center text-sm text-muted">
-          {money(available, meta)} left in the budget
-        </span>
+        {amountProblem ? (
+          <span className="mt-1.5 block text-center text-sm text-rose-700" role="alert">
+            {amountProblem}
+          </span>
+        ) : (
+          <span className="mt-1.5 block text-center text-sm text-muted">
+            {BigInt(most) > 0n ? `Up to ${money(most, meta)}` : "Nothing left in the budget"}
+          </span>
+        )}
       </label>
 
       <label className="block space-y-1.5">
@@ -142,19 +163,19 @@ export function PostTaskForm({
         <summary className="font-medium text-brand">More options</summary>
         <div className="mt-4 space-y-4">
           <label className="block space-y-1.5">
-            <span className="font-medium">Days to finish once someone takes it</span>
+            <span className="font-medium">Time to finish</span>
             <select className={input} value={days} onChange={(e) => setDays(e.target.value)}>
               {[1, 3, 7, 14, 30].map((d) => (
                 <option key={d} value={d}>
-                  {d} {d === 1 ? "day" : "days"}
+                  {d} {d === 1 ? "day" : "days"} after they take it
                 </option>
               ))}
             </select>
           </label>
           <label className="block space-y-1.5">
-            <span className="font-medium">Only for</span>
+            <span className="font-medium">Who can take it</span>
             <select className={input} value={only} onChange={(e) => setOnly(e.target.value)}>
-              <option value="">Anyone who can be paid from this budget</option>
+              <option value="">Anyone on this budget</option>
               {payees.map((p) => (
                 <option key={p} value={p}>
                   {shortName(p)} ({p})
@@ -165,7 +186,7 @@ export function PostTaskForm({
         </div>
       </details>
 
-      {(error || (problem && (title || amount))) && (
+      {(error || (problem && problem !== amountProblem && title && amount)) && (
         <p className="text-sm text-rose-700" role="alert">
           {error ?? problem}
         </p>
