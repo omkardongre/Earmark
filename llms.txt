@@ -14,6 +14,7 @@ Mainnet (9 Nov, native USDC, tiny amounts): app https://earmark-mainnet-87814144
 - [Replay a DAO's history](https://earmark-878141445235.us-central1.run.app/preview): NEARWEEK's 14,171 mainnet proposals replayed against two limits
 - [Check it yourself](https://earmark-878141445235.us-central1.run.app/verify): keyless live checks of the contract
 - [People](https://earmark-878141445235.us-central1.run.app/people): contributor and lead records from contract views
+- [Tasks](https://earmark-878141445235.us-central1.run.app/budgets/0/tasks): funded tasks (bounties) and trusted contributors; testnet only, mainnet comes in the same upgrade as NEAR Intents payouts
 - [Contract source](https://github.com/omkardongre/Earmark/tree/main/contracts/earmark/src): Rust, near-sdk 5.29.1
 - [Unit tests](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `make test`
 - [Sandbox tests](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/tests/sandbox.rs): `make test-sandbox` (Docker)
@@ -33,6 +34,7 @@ Mainnet (9 Nov, native USDC, tiny amounts): app https://earmark-mainnet-87814144
 - [Funds are reserved at request](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `second_request_cannot_spend_a_reservation`; live race scene on /try
 - [Same work can't be paid twice](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `escalation_reserves_nothing_and_blocks_duplicate_work`, `override_allows_one_repeat_of_the_same_work`; `duplicate_work` step in `make demo`
 - [Failed payout releases the reservation](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/tests/sandbox.rs): `payout_to_unregistered_payee_fails_and_releases_reservation`
+- [Tasks are funded before work and pay through the usual tiers](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `task_reserves_at_posting_and_pays_through_the_tiers`; trust only skips the approver, up to a DAO-set limit: `trusted_contributor_skips_the_approver_until_a_strike`
 - [Approver can't approve their own request](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `approver_cannot_approve_own_request`
 - [Agent key can only ask](https://earmark-878141445235.us-central1.run.app/try): the lead's key calling `approve` is refused by NEAR; sandbox script `scripts/testnet/s5-agent-key.sh`
 - [NEARWEEK numbers](https://earmark-878141445235.us-central1.run.app/preview): 14,171 proposals; with limits 1 / 5 NEAR the council votes on 20 of 13,896 payouts; 121 requests for work already paid, 23 of them paid twice

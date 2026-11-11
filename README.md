@@ -230,7 +230,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 
 ### Tasks (bounties) and trusted contributors
 
-Built 11 Nov; not yet installed on the demo contracts (needs a DAO-voted upgrade). Research: `research/solution-research/17-bounty-board-research-2026-11-11.md`.
+**Installed on testnet** (11 Nov, reproducible build at `a5dcb74`, code `6H2m7r…BhRx`, DAO proposals 19 and 20; trust turned on for budget 0 by proposal 21: trusted after 2 accepted, paid tasks, up to 30 tUSDC). **Not on mainnet yet:** it goes in one upgrade together with NEAR Intents payouts, so mainnet still runs `G3SbqW…ZXtX` and its app says tasks aren't available. Research: `research/solution-research/17-bounty-board-research-2026-11-11.md`.
 
 - **Post:** a lead posts a task (title, brief link, amount, days to finish, optionally "only for" one payee). The amount is reserved in the budget at once (`committed`), so the contributor knows the money is there. A task is at most the one-approval limit; bigger work stays a normal request that goes to a DAO vote. Posting counts toward the lead's 100 requests per period, and a budget holds at most 50 reserved tasks.
 - **Claim and submit:** an approved payee who isn't a lead or approver of that budget claims it (one open claim, three when trusted) and sends a work link. The same work link can't be paid twice for them (`duplicate_work`). After the deadline anyone can reopen the claim.
