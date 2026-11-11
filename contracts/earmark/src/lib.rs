@@ -8,6 +8,7 @@ mod events;
 mod funding;
 mod request;
 mod spend;
+mod tasks;
 
 use near_sdk::json_types::{U64, U128};
 use near_sdk::store::{IterableMap, IterableSet, LookupMap};
@@ -22,6 +23,8 @@ use events::Event;
 use near_sdk::borsh;
 use request::RequestCount;
 pub use request::{BlockReason, PayeeRecord, Record, Request, RequestStatus, SpendCheck, Tier};
+use tasks::TaskList;
+pub use tasks::{PayeeTrust, Task, TaskRules, TaskStatus, TrustView};
 
 pub type EnvelopeId = u64;
 
@@ -54,6 +57,13 @@ pub(crate) enum StorageKey {
     EnvelopeRequests { envelope_id: EnvelopeId },
     PayeeRecords,
     RequestCounts,
+    // Tasks (added after R23). New variants go at the end only: each prefix is its index.
+    Tasks,
+    TaskLists,
+    EnvelopeTasks { envelope_id: EnvelopeId },
+    TaskRules,
+    Trust,
+    TaskRequests,
 }
 
 #[near(contract_state)]
@@ -82,6 +92,67 @@ pub struct Contract {
     payee_records: LookupMap<AccountId, PayeeRecord>,
     /// R19: requests per `(envelope, spender)` in the current period.
     request_counts: LookupMap<CryptoHash, RequestCount>,
+    tasks: LookupMap<u64, Task>,
+    next_task_id: u64,
+    /// Per budget: task ids and the reserved ones.
+    task_lists: LookupMap<EnvelopeId, TaskList>,
+    /// Per budget trust rules, set by the DAO.
+    task_rules: LookupMap<EnvelopeId, TaskRules>,
+    /// `(envelope, payee)` -> accepted, paid tasks and strikes.
+    trust: LookupMap<CryptoHash, PayeeTrust>,
+    /// Payment request id -> the task it pays.
+    task_requests: LookupMap<String, u64>,
+}
+
+/// State layout from R18 to R23 (mainnet `budgets.omkar5.near` and testnet since 7 Nov).
+/// `migrate` converts it.
+#[near]
+struct ContractV2 {
+    dao_id: AccountId,
+    token_ids: IterableSet<AccountId>,
+    envelopes: IterableMap<EnvelopeId, Envelope>,
+    next_envelope_id: EnvelopeId,
+    loosen_delay_secs: u64,
+    requests: LookupMap<String, Request>,
+    work_claims: LookupMap<CryptoHash, String>,
+    work_overrides: LookupMap<CryptoHash, ()>,
+    records: LookupMap<AccountId, Record>,
+    eligibility: EligibilityRules,
+    changes: LookupMap<u64, QueuedChange>,
+    queued_ids: IterableSet<u64>,
+    next_change_id: u64,
+    pending_payees: LookupMap<CryptoHash, u64>,
+    payee_records: LookupMap<AccountId, PayeeRecord>,
+    request_counts: LookupMap<CryptoHash, RequestCount>,
+}
+
+impl From<ContractV2> for Contract {
+    fn from(old: ContractV2) -> Self {
+        Self {
+            dao_id: old.dao_id,
+            token_ids: old.token_ids,
+            envelopes: old.envelopes,
+            next_envelope_id: old.next_envelope_id,
+            loosen_delay_secs: old.loosen_delay_secs,
+            requests: old.requests,
+            work_claims: old.work_claims,
+            work_overrides: old.work_overrides,
+            records: old.records,
+            eligibility: old.eligibility,
+            changes: old.changes,
+            queued_ids: old.queued_ids,
+            next_change_id: old.next_change_id,
+            pending_payees: old.pending_payees,
+            payee_records: old.payee_records,
+            request_counts: old.request_counts,
+            tasks: LookupMap::new(StorageKey::Tasks),
+            next_task_id: 0,
+            task_lists: LookupMap::new(StorageKey::TaskLists),
+            task_rules: LookupMap::new(StorageKey::TaskRules),
+            trust: LookupMap::new(StorageKey::Trust),
+            task_requests: LookupMap::new(StorageKey::TaskRequests),
+        }
+    }
 }
 
 /// State layout before R18–R21 (deployed as `v4.earmark.testnet`). `migrate` converts it.
@@ -103,7 +174,7 @@ struct ContractV1 {
     pending_payees: LookupMap<CryptoHash, u64>,
 }
 
-impl From<ContractV1> for Contract {
+impl From<ContractV1> for ContractV2 {
     fn from(old: ContractV1) -> Self {
         Self {
             dao_id: old.dao_id,
@@ -169,6 +240,12 @@ impl Contract {
             pending_payees: LookupMap::new(StorageKey::PendingPayees),
             payee_records: LookupMap::new(StorageKey::PayeeRecords),
             request_counts: LookupMap::new(StorageKey::RequestCounts),
+            tasks: LookupMap::new(StorageKey::Tasks),
+            next_task_id: 0,
+            task_lists: LookupMap::new(StorageKey::TaskLists),
+            task_rules: LookupMap::new(StorageKey::TaskRules),
+            trust: LookupMap::new(StorageKey::Trust),
+            task_requests: LookupMap::new(StorageKey::TaskRequests),
         }
     }
 
@@ -220,8 +297,9 @@ impl Contract {
             .as_return()
     }
 
-    /// Runs after `upgrade`. Reads the current layout as is, or converts the layout from before
-    /// R18–R21. Requests, records and claims keep their storage; only the root changes.
+    /// Runs after `upgrade`. Reads the current layout as is, or converts an older one: before
+    /// tasks (R18–R23), or before R18–R21. Requests, records and claims keep their storage;
+    /// only the root changes.
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
@@ -229,8 +307,11 @@ impl Contract {
         if let Ok(current) = borsh::from_slice::<Self>(&raw) {
             return current;
         }
+        if let Ok(v2) = borsh::from_slice::<ContractV2>(&raw) {
+            return v2.into();
+        }
         borsh::from_slice::<ContractV1>(&raw)
-            .map(Self::from)
+            .map(|v1| ContractV2::from(v1).into())
             .unwrap_or_else(|_| env::panic_str("unknown_state_layout"))
     }
 

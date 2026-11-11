@@ -1,6 +1,7 @@
 use near_sdk::json_types::{U64, U128};
 use near_sdk::{AccountId, near};
 
+use crate::tasks::{TaskRules, TaskStatus};
 use crate::{Change, Tier};
 
 /// NEP-297 events, standard `earmark`.
@@ -108,4 +109,49 @@ pub enum Event<'a> {
     },
     #[event_version("1.0.0")]
     CloseRefundFailed { envelope_id: U64, amount: U128 },
+    #[event_version("1.0.0")]
+    TaskPosted {
+        task_id: U64,
+        envelope_id: U64,
+        lead: &'a AccountId,
+        amount: U128,
+    },
+    #[event_version("1.0.0")]
+    TaskClaimed {
+        task_id: U64,
+        claimant: &'a AccountId,
+    },
+    #[event_version("1.0.0")]
+    ClaimReleased { task_id: U64, by: &'a AccountId },
+    #[event_version("1.0.0")]
+    WorkSubmitted { task_id: U64, work_ref: &'a str },
+    #[event_version("1.0.0")]
+    WorkRejected {
+        task_id: U64,
+        by: &'a AccountId,
+        contributor: &'a AccountId,
+        reason: &'a str,
+        for_cause: bool,
+    },
+    #[event_version("1.0.0")]
+    TaskAccepted { task_id: U64, request_id: &'a str },
+    #[event_version("1.0.0")]
+    TaskCancelled {
+        task_id: U64,
+        by: &'a AccountId,
+        reason: &'a str,
+    },
+    /// The task's payment ended: `paid`, or back to `submitted` (reservation held again), or
+    /// `cancelled` if the budget closed or the money is gone.
+    #[event_version("1.0.0")]
+    TaskSettled {
+        task_id: U64,
+        request_id: &'a str,
+        status: TaskStatus,
+    },
+    #[event_version("1.0.0")]
+    TaskRulesSet {
+        envelope_id: U64,
+        rules: &'a TaskRules,
+    },
 }

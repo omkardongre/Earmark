@@ -24,6 +24,9 @@ pub enum Tier {
     /// Becomes a DAO Transfer proposal that sends the amount from the treasury to Earmark,
     /// which pays the payee and records it; nothing is reserved from the budget.
     Escalate,
+    /// Paid at once because the payee is a trusted contributor of this budget: above the
+    /// spender's own limit, but within the budget's trusted limit (tasks). Added after R23.
+    Trusted,
 }
 
 #[near(serializers = [borsh, json])]
@@ -204,10 +207,14 @@ pub fn override_key(work: &CryptoHash, spender: &AccountId) -> CryptoHash {
     env::sha256_array(&data)
 }
 
-/// The tier from the amount only (R17 step 4).
-pub fn tier_for(envelope: &Envelope, auto_limit: u128, amount: u128) -> Tier {
+/// The tier from the amount only (R17 step 4). `trusted_limit` is 0 unless the payee is a
+/// trusted contributor of this budget; it never reaches past the one-approver limit.
+pub fn tier_for(envelope: &Envelope, auto_limit: u128, trusted_limit: u128, amount: u128) -> Tier {
+    let trusted_limit = trusted_limit.min(envelope.one_approver_limit);
     if amount <= auto_limit {
         Tier::Auto
+    } else if amount <= trusted_limit {
+        Tier::Trusted
     } else if amount <= envelope.one_approver_limit {
         Tier::OneApprover
     } else {

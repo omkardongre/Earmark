@@ -34,7 +34,7 @@ const GAS_DAO_PAYOUT_MARGIN: Gas = Gas::from_tgas(4);
 pub const SETTLE_WAIT_BLOCKS: u64 = 20;
 const ONE_YOCTO: NearToken = NearToken::from_yoctonear(1);
 /// NEAR kept back from the bond float for the contract's own storage growth.
-const STORAGE_RESERVE: NearToken = NearToken::from_millinear(500);
+pub(crate) const STORAGE_RESERVE: NearToken = NearToken::from_millinear(500);
 
 #[ext_contract(ext_dao)]
 #[allow(dead_code)]
@@ -111,12 +111,44 @@ impl Contract {
         let tier = self
             .evaluate(id, &spender, &request_id, &payee, amount.0, &work_ref)
             .unwrap_or_else(|reason| env::panic_str(reason.code()));
+        self.create_request(
+            spender,
+            envelope_id,
+            request_id,
+            payee,
+            amount,
+            memo,
+            work_ref,
+            receipt,
+            tier,
+        )
+    }
+}
 
+impl Contract {
+    /// Records a request that `evaluate` allowed with `tier`, reserves or pays it, and starts
+    /// its tier's flow. Shared by `request_spend` and `accept_task`; the caller has rolled the
+    /// period and run `evaluate` in the same call.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn create_request(
+        &mut self,
+        spender: AccountId,
+        envelope_id: U64,
+        request_id: String,
+        payee: AccountId,
+        amount: U128,
+        memo: String,
+        work_ref: String,
+        receipt: Option<String>,
+        tier: Tier,
+    ) -> PromiseOrValue<RequestStatus> {
+        let now = env::block_timestamp();
+        let id = envelope_id.0;
         let envelope = self.envelopes.get_mut(&id).unwrap();
         let period_start_ns = envelope.period_start_ns;
         let mut limits = envelope.spender_current(&spender).unwrap();
         let status = match tier {
-            Tier::Auto => {
+            Tier::Auto | Tier::Trusted => {
                 envelope.in_flight += amount.0;
                 RequestStatus::Paying
             }
@@ -189,7 +221,7 @@ impl Contract {
             .push(request_id.clone());
         self.requests.insert(request_id.clone(), request);
         match tier {
-            Tier::Auto => self
+            Tier::Auto | Tier::Trusted => self
                 .pay(&token_id, &request_id, &payee, amount, memo)
                 .into(),
             Tier::OneApprover => PromiseOrValue::Value(RequestStatus::PendingApproval),
@@ -204,7 +236,10 @@ impl Contract {
                 .into(),
         }
     }
+}
 
+#[near]
+impl Contract {
     pub fn get_request(&self, request_id: String) -> Option<Request> {
         self.requests.get(&request_id).cloned()
     }
@@ -390,6 +425,7 @@ impl Contract {
             .emit();
             request.status = RequestStatus::PaidByDao;
             request.failure = None;
+            self.task_settled(&request_id, &request, true);
         } else {
             Event::DaoPayoutFailed {
                 request_id: &request_id,
@@ -577,6 +613,22 @@ impl Contract {
         amount: u128,
         work_ref: &str,
     ) -> Result<Tier, BlockReason> {
+        self.evaluate_with(envelope_id, spender, request_id, payee, amount, work_ref, 0)
+    }
+
+    /// `evaluate`, counting `held` as available too: the reservation of the task being
+    /// accepted, which `accept_task` frees before it runs these checks.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn evaluate_with(
+        &self,
+        envelope_id: EnvelopeId,
+        spender: &AccountId,
+        request_id: &str,
+        payee: &AccountId,
+        amount: u128,
+        work_ref: &str,
+        held: u128,
+    ) -> Result<Tier, BlockReason> {
         let envelope = self
             .envelopes
             .get(&envelope_id)
@@ -630,8 +682,9 @@ impl Contract {
         {
             return Err(BlockReason::DuplicateWork);
         }
-        // 4. tier from the amount only
-        let tier = tier_for(envelope, limits.auto_limit.0, amount);
+        // 4. tier from the amount, and from the payee's record in this budget (tasks)
+        let trusted_limit = self.trusted_limit(envelope_id, payee);
+        let tier = tier_for(envelope, limits.auto_limit.0, trusted_limit, amount);
         // 5. budget checks for the tiers paid from the budget
         if tier == Tier::Escalate {
             if limits.open_escalations >= MAX_OPEN_ESCALATIONS {
@@ -641,7 +694,7 @@ impl Contract {
             if tier == Tier::OneApprover && envelope.pending.len() >= MAX_PENDING {
                 return Err(BlockReason::TooManyPending);
             }
-            if amount > envelope.available() {
+            if amount > envelope.available().saturating_add(held) {
                 return Err(BlockReason::OverAvailable);
             }
             let period_ok =
@@ -773,6 +826,7 @@ impl Contract {
             amount: request.amount,
         }
         .emit();
+        self.task_settled(request_id, &request, true);
         self.requests.insert(request_id.to_owned(), request);
     }
 
@@ -813,12 +867,13 @@ impl Contract {
         }
         request.status = status;
         request.failure = reason.map(str::to_owned);
+        self.task_settled(request_id, &request, false);
         self.requests.insert(request_id.to_owned(), request);
     }
 }
 
 /// The contract's NEAR not locked for storage.
-fn free_near() -> NearToken {
+pub(crate) fn free_near() -> NearToken {
     let storage = env::storage_byte_cost().saturating_mul(u128::from(env::storage_usage()));
     env::account_balance().saturating_sub(storage)
 }

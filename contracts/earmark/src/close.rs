@@ -25,6 +25,7 @@ impl Contract {
             .unwrap_or_else(|| env::panic_str("unknown_envelope"));
         envelope.closed = true;
         let pending: Vec<String> = envelope.pending.iter().cloned().collect();
+        self.cancel_open_tasks(id);
 
         for request_id in &pending {
             let request = self.requests.get(request_id).cloned().unwrap();
