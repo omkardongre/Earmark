@@ -29,6 +29,8 @@ export function toBase(input: string, meta: TokenMeta): string | null {
  */
 export function shortName(account: string): string {
   if (account.length === 64) return `${account.slice(0, 6)}…${account.slice(-4)}`;
+  // A wallet address on near.com (MetaMask and others): "0x8ba1…ba72".
+  if (/^0x[0-9a-f]{40}$/.test(account)) return `${account.slice(0, 6)}…${account.slice(-4)}`;
   const first = account.split(".")[0] ?? account;
   return first
     .split(/[-_]+/)
@@ -89,9 +91,23 @@ export const TASK_SYSTEM_REASON: Record<string, string> = {
   claim_expired: "The last person ran out of time.",
   released: "The last person gave it back.",
   transfer_failed: "The payment didn’t go through. The money is set aside again.",
+  intents_refused: "near.com didn’t accept the payment. The money is set aside again.",
+  partial_credit: "Only part of the payment reached near.com. The rest is set aside again.",
   funds_gone: "The payment failed and the budget no longer had the money.",
   closed: "The budget was closed.",
 };
+/** Why a payout failed, in plain words; other reasons are shown as written. */
+export function payoutReason(reason: string): string {
+  switch (reason) {
+    case "intents_refused":
+      return "near.com didn’t accept it";
+    case "partial_credit":
+      return "only part reached near.com";
+    default:
+      return reason.replaceAll("_", " ");
+  }
+}
+
 /** Plain-words reason for a blocked payment, with what to do about it. */
 export const BLOCKED: Record<BlockReason, string> = {
   closed: "This budget is closed.",

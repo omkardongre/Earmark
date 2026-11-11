@@ -89,6 +89,8 @@ export type Config = {
   loosen_delay_secs: string;
   eligibility: { min_paid_count: number; min_history_secs: string; cause_cooldown_secs: string };
   envelope_count: string;
+  /** Where near.com payees are paid; missing or null when this contract can't pay them. */
+  intents_contract?: string | null;
 };
 
 export type SpenderRecord = {

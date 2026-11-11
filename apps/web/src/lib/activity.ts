@@ -55,6 +55,8 @@ export function describeChange(change: Change, meta: TokenMeta): string {
       return `Remove approver ${who("approver")}`;
     case "add_payee":
       return `Allow payments to ${who("payee")}`;
+    case "add_intents_payee":
+      return `Allow payments to ${who("payee")} on near.com`;
     case "remove_payee":
       return `Stop payments to ${who("payee")}`;
     case "pause":
