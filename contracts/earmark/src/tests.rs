@@ -24,6 +24,7 @@ fn contract() -> Contract {
         vec![account("usdc.near")],
         None,
         None,
+        None,
     )
 }
 
@@ -1140,4 +1141,172 @@ fn tasks_survive_the_upgrade_from_the_r23_layout() {
     let id = task(&mut c, 20, None);
     assert_eq!(id, U64(0));
     assert_eq!(c.get_envelope(U64(0)).unwrap().available, U128(40));
+}
+
+/// Budget 0 funded with 60 on a contract that can pay near.com, with `dave.near` added as a
+/// near.com payee (queued by approver bob, applied after the delay).
+fn near_com_contract() -> Contract {
+    use near_contract_standards::fungible_token::receiver::FungibleTokenReceiver;
+    testing_env!(context("earmark.testnet", NearToken::from_near(0)).build());
+    let mut c = Contract::new(
+        account("club.sputnik-dao.near"),
+        vec![account("usdc.near")],
+        None,
+        None,
+        Some(account("intents.near")),
+    );
+    testing_env!(context("club.sputnik-dao.near", NearToken::from_millinear(100)).build());
+    c.create_envelope(input());
+    testing_env!(context("usdc.near", NearToken::from_yoctonear(1)).build());
+    let _ = c.ft_on_transfer(
+        account("club.sputnik-dao.near"),
+        U128(60),
+        "{\"envelope_id\":\"0\"}".to_owned(),
+    );
+    at("bob.near", 0);
+    let change = c.approve_intents_payee(U64(0), account("dave.near"));
+    assert_eq!(
+        check(&c, "r0", "dave.near", 5, "w").blocked,
+        Some(crate::BlockReason::PayeePending)
+    );
+    at("anyone.near", crate::DEFAULT_LOOSEN_DELAY_SECS);
+    c.apply_change(change);
+    c
+}
+
+#[test]
+fn near_com_payee_is_paid_only_when_the_full_amount_is_kept() {
+    use crate::RequestStatus::{Failed, Paid};
+    let mut c = near_com_contract();
+    assert_eq!(c.list_intents_payees(U64(0)), vec![account("dave.near")]);
+
+    let pay = |c: &mut Contract, id: &str, work: &str, kept: u128| {
+        at("alice.near", crate::DEFAULT_LOOSEN_DELAY_SECS);
+        let _ = c.request_spend(
+            U64(0),
+            id.to_owned(),
+            account("dave.near"),
+            U128(5),
+            "memo".to_owned(),
+            work.to_owned(),
+            None,
+        );
+        assert!(c.is_intents_request(id.to_owned()));
+        at("earmark.testnet", crate::DEFAULT_LOOSEN_DELAY_SECS);
+        c.on_paid_intents(id.to_owned(), Ok(U128(kept)))
+    };
+    assert_eq!(pay(&mut c, "r1", "w1", 5), Paid);
+    assert!(get_logs().iter().any(|l| l.contains("paid_to_intents")));
+    // Refunded by Intents (bad id, paused): failed, money back, work link free again.
+    assert_eq!(pay(&mut c, "r2", "w2", 0), Failed);
+    let r2 = c.get_request("r2".to_owned()).unwrap();
+    assert_eq!(r2.failure.as_deref(), Some("intents_refused"));
+    let view = c.get_envelope(U64(0)).unwrap();
+    assert_eq!((view.available, view.spent_total), (U128(55), U128(5)));
+    assert_eq!(c.get_payee_record(account("dave.near")).paid_count, 1);
+}
+
+#[test]
+fn near_com_mode_is_kept_per_request_and_cleared_on_removal() {
+    let mut c = near_com_contract();
+    // 40 needs one approval, so it waits while the payee is removed.
+    at("alice.near", crate::DEFAULT_LOOSEN_DELAY_SECS);
+    request_to(&mut c, "r1", "dave.near", 40, "w1");
+    at("bob.near", crate::DEFAULT_LOOSEN_DELAY_SECS);
+    c.remove_payee(U64(0), account("dave.near"));
+    assert!(c.list_intents_payees(U64(0)).is_empty());
+    assert!(c.is_intents_request("r1".to_owned()));
+    // Added back as a NEAR account: new requests are paid there.
+    let change = c.approve_payee(U64(0), account("dave.near"));
+    at("anyone.near", 2 * crate::DEFAULT_LOOSEN_DELAY_SECS);
+    c.apply_change(change);
+    at("alice.near", 2 * crate::DEFAULT_LOOSEN_DELAY_SECS);
+    request_to(&mut c, "r2", "dave.near", 5, "w2");
+    assert!(!c.is_intents_request("r2".to_owned()));
+}
+
+#[test]
+#[should_panic(expected = "intents_not_available")]
+fn near_com_payee_needs_an_intents_contract() {
+    // A testnet contract deployed without one (NEAR Intents has no testnet).
+    let mut c = spending_contract(60);
+    assert_eq!(c.get_config().intents_contract, None);
+    at("bob.near", 0);
+    c.approve_intents_payee(U64(0), account("dave.near"));
+}
+
+fn request_to(c: &mut Contract, id: &str, payee: &str, amount: u128, work: &str) {
+    let _ = c.request_spend(
+        U64(0),
+        id.to_owned(),
+        account(payee),
+        U128(amount),
+        "memo".to_owned(),
+        work.to_owned(),
+        None,
+    );
+}
+
+#[test]
+fn migrate_reads_the_tasks_layout() {
+    let mut c = spending_contract(60);
+    at("alice.near", 0);
+    task(&mut c, 20, None);
+    let Contract {
+        dao_id,
+        token_ids,
+        envelopes,
+        next_envelope_id,
+        loosen_delay_secs,
+        requests,
+        work_claims,
+        work_overrides,
+        records,
+        eligibility,
+        changes,
+        queued_ids,
+        next_change_id,
+        pending_payees,
+        payee_records,
+        request_counts,
+        tasks,
+        next_task_id,
+        task_lists,
+        task_rules,
+        trust,
+        task_requests,
+        ..
+    } = c;
+    let old = crate::ContractV3 {
+        dao_id,
+        token_ids,
+        envelopes,
+        next_envelope_id,
+        loosen_delay_secs,
+        requests,
+        work_claims,
+        work_overrides,
+        records,
+        eligibility,
+        changes,
+        queued_ids,
+        next_change_id,
+        pending_payees,
+        payee_records,
+        request_counts,
+        tasks,
+        next_task_id,
+        task_lists,
+        task_rules,
+        trust,
+        task_requests,
+    };
+    near_sdk::env::state_write(&old);
+    drop(old);
+    let c = Contract::migrate();
+
+    assert!(c.get_task(U64(0)).is_some());
+    assert_eq!(c.get_envelope(U64(0)).unwrap().available, U128(40));
+    // `earmark.testnet` isn't a mainnet account, so near.com stays off.
+    assert_eq!(c.get_config().intents_contract, None);
 }

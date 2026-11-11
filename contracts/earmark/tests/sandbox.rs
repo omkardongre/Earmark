@@ -785,6 +785,9 @@ async fn mainnet_upgrade_rehearsal() -> TestResult {
     for (old, new) in before.iter().zip(&after) {
         assert_subset(old, new);
     }
+    // A `.near` contract pays near.com payees through `intents.near` from the upgrade on.
+    let config = view(&net, &contract, "get_config", json!({})).await?;
+    assert_eq!(config["intents_contract"], "intents.near");
 
     // 3. The helper takes the blob back and gets the deposit.
     let remove = json!({ "hash": new_hash });
@@ -827,4 +830,177 @@ fn assert_subset(old: &Value, new: &Value) {
         }
         _ => assert_eq!(old, new),
     }
+}
+
+/// Feature 3 on the real NEAR Intents code: mainnet `intents.near`'s wasm (without its state),
+/// fetched at test time, so it needs internet and runs only on request:
+/// `cargo test --test sandbox -- --ignored intents_payout`.
+/// Pays a MetaMask-style `0x…` payee into their Intents balance at the 100 Tgas the app sends,
+/// then pauses Intents: the refund fails the payment and the money stays in the budget.
+#[tokio::test]
+#[ignore]
+async fn intents_payout() -> TestResult {
+    const MAINNET: &str = "https://rpc.mainnet.fastnear.com";
+    let names = ["dao", "token", "earmark", "alice", "intents.near"];
+    let accounts: Vec<GenesisAccount> = names
+        .iter()
+        .map(|n| GenesisAccount::default_with_name(n.parse().unwrap()))
+        .collect();
+    let sandbox = Sandbox::start_sandbox_with_config(SandboxConfig {
+        additional_accounts: accounts.clone(),
+        ..Default::default()
+    })
+    .await?;
+    let net = NetworkConfig::from_rpc_url("sandbox", sandbox.rpc_addr.parse()?);
+    let actors = accounts.iter().map(actor).collect::<TestResult<Vec<_>>>()?;
+    let [dao, token, earmark, alice, intents] =
+        <[Actor; 5]>::try_from(actors).map_err(|_| "five actors")?;
+    let zero = NearToken::from_near(0);
+    // A MetaMask user's Intents id: "0x" + lowercase hex address.
+    let payee: AccountId = "0x8ba1f109551bd432803012645ac136ddd64dba72".parse()?;
+
+    let mainnet = NetworkConfig::from_rpc_url("mainnet", MAINNET.parse()?);
+    let intents_code = Contract(intents.id.clone())
+        .wasm()
+        .fetch_from(&mainnet)
+        .await?
+        .data
+        .code_base64;
+    let config = json!({ "config": {
+        "wnear_id": "wrap.near",
+        "fees": { "fee": 0, "fee_collector": intents.id },
+        "roles": { "grantees": { "DAO": [dao.id], "UnpauseManager": [dao.id] } },
+    }});
+    Contract::deploy(intents.id.clone())
+        .use_code(near_sdk::base64::Engine::decode(
+            &near_sdk::base64::engine::general_purpose::STANDARD,
+            &intents_code,
+        )?)
+        .with_init_call("new", config)?
+        .with_signer(intents.signer.clone())
+        .send_to(&net)
+        .await?
+        .into_result()?;
+    Contract::deploy(token.id.clone())
+        .use_code(wasm("test_token")?)
+        .with_init_call(
+            "new",
+            json!({ "owner_id": dao.id, "name": "Test USDC", "symbol": "tUSDC" }),
+        )?
+        .with_signer(token.signer.clone())
+        .send_to(&net)
+        .await?
+        .into_result()?;
+    Contract::deploy(earmark.id.clone())
+        .use_code(wasm("earmark")?)
+        .with_init_call(
+            "new",
+            json!({ "dao_id": dao.id, "token_ids": [token.id], "loosen_delay_secs": "0",
+                    "intents_contract": intents.id }),
+        )?
+        .with_signer(earmark.signer.clone())
+        .send_to(&net)
+        .await?
+        .into_result()?;
+    let deposit = NearToken::from_millinear(10);
+    for account in [&earmark.id, &intents.id] {
+        let args = json!({ "account_id": account, "registration_only": true });
+        call(&net, &dao, &token.id, "storage_deposit", args, deposit).await?;
+    }
+    let mint = json!({ "account_id": dao.id, "amount": "1000" });
+    call(&net, &dao, &token.id, "mint", mint, zero).await?;
+    let rules = json!({ "envelope": {
+        "name": "Contributors", "token_id": token.id,
+        "spenders": [{ "account_id": alice.id, "auto_limit": "10", "period_cap": "100" }],
+        "approvers": [dao.id], "one_approver_limit": "50", "raise_ceiling": "20",
+        "payees": [], "period_secs": "2592000", "period_cap": "100",
+    }});
+    let storage = NearToken::from_millinear(100);
+    call(&net, &dao, &earmark.id, "create_envelope", rules, storage).await?;
+    let fund =
+        json!({ "receiver_id": earmark.id, "amount": "100", "msg": "{\"envelope_id\":\"0\"}" });
+    let one = NearToken::from_yoctonear(1);
+    call(&net, &dao, &token.id, "ft_transfer_call", fund, one).await?;
+    let add = json!({ "envelope_id": "0", "payee": payee });
+    call(&net, &dao, &earmark.id, "approve_intents_payee", add, zero).await?;
+    call(
+        &net,
+        &alice,
+        &earmark.id,
+        "apply_change",
+        json!({ "change_id": "0" }),
+        zero,
+    )
+    .await?;
+
+    let request = |id: &str| {
+        view(
+            &net,
+            &earmark.id,
+            "get_request",
+            json!({ "request_id": id }),
+        )
+    };
+    let intents_balance = || {
+        let args = json!({ "account_id": payee, "token_id": format!("nep141:{}", token.id) });
+        view(&net, &intents.id, "mt_balance_of", args)
+    };
+    let available = || async {
+        let e = view(
+            &net,
+            &earmark.id,
+            "get_envelope",
+            json!({ "envelope_id": "0" }),
+        )
+        .await?;
+        TestResult::Ok(e["available"].clone())
+    };
+
+    // Paid into the payee's Intents balance, at the gas the app sends.
+    let pay = |id: &str| {
+        json!({ "envelope_id": "0", "request_id": id, "payee": payee,
+                                 "amount": "5", "memo": "", "work_ref": id })
+    };
+    call_gas(
+        &net,
+        &alice,
+        &earmark.id,
+        "request_spend",
+        pay("n1"),
+        zero,
+        100,
+    )
+    .await?;
+    assert_eq!(status(&request("n1").await?), "paid");
+    assert_eq!(intents_balance().await?, "5");
+    assert_eq!(available().await?, "95");
+
+    // Intents paused: it refunds, the payment fails, the money stays in the budget.
+    let key = json!({ "key": "ft_on_transfer" });
+    call(
+        &net,
+        &dao,
+        &intents.id,
+        "pa_pause_feature",
+        key.clone(),
+        zero,
+    )
+    .await?;
+    call_gas(
+        &net,
+        &alice,
+        &earmark.id,
+        "request_spend",
+        pay("n2"),
+        zero,
+        100,
+    )
+    .await?;
+    let failed = request("n2").await?;
+    assert_eq!(status(&failed), "failed", "{failed}");
+    assert_eq!(failed["failure"], "intents_refused");
+    assert_eq!(intents_balance().await?, "5");
+    assert_eq!(available().await?, "95");
+    call(&net, &dao, &intents.id, "pa_unpause_feature", key, zero).await?;
+    Ok(())
 }
