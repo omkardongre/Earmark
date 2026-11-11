@@ -226,7 +226,7 @@ Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued
 ### Safety limits
 
 - **DAO votes pay through Earmark (R22).** An escalation is a Transfer proposal that sends the amount to Earmark with `{"request_id": …}`. Earmark accepts exactly that amount once, while the request is `escalated`, and pays the payee in the same transaction (a Trezu vote leaves enough gas). Only when that transfer succeeds is the request `paid_by_dao` and counted in the records. If the payout fails, the request is `dao_funded` and the money stays held; anyone can retry with `settle_escalation`. A second payment, a wrong amount or a closed request is refunded to the DAO.
-- **Escalations settle.** `settle_escalation` reads the DAO proposal while a request is `escalated`: rejected, removed, expired or moved → `escalation_closed`. Approved but the money never arrived (20 blocks, about 11 s, after the vote) → `escalation_closed` (`dao_payment_returned`). A proposal filed before R22, which paid the payee directly, → `paid_by_dao` once it has stayed approved for 20 blocks (Sputnik turns it `Failed` if its transfer fails). Each outcome frees the lead's DAO-vote slot (max 5 open). The payment page has a "Check the DAO result" button, and "Try the payout again" for `dao_funded`. **Installed on testnet** (10 Nov, reproducible build at `d68dc6c`, code `G3SbqW…ZXtX`, DAO proposals 17 and 18; R22 first at `23c86db` by proposals 14 and 15). Checked live: proposal 16 paid Sofia 60 tUSDC through Earmark. The testnet DAO runs older Sputnik code that gives Earmark only ~1.4 Tgas in the vote, so the payout ran in a second step (`settle_escalation`, tx `3pjSD9E1…`); the mainnet DAO's code leaves enough to pay inside the vote (sandbox test). **Mainnet** still runs the code from before R22 until its DAO votes the upgrade.
+- **Escalations settle.** `settle_escalation` reads the DAO proposal while a request is `escalated`: rejected, removed, expired or moved → `escalation_closed`. Approved but the money never arrived (20 blocks, about 11 s, after the vote) → `escalation_closed` (`dao_payment_returned`). A proposal filed before R22, which paid the payee directly, → `paid_by_dao` once it has stayed approved for 20 blocks (Sputnik turns it `Failed` if its transfer fails). Each outcome frees the lead's DAO-vote slot (max 5 open). The payment page has a "Check the DAO result" button, and "Try the payout again" for `dao_funded`. **Installed on testnet** (10 Nov, reproducible build at `d68dc6c`, code `G3SbqW…ZXtX`, DAO proposals 17 and 18; R22 first at `23c86db` by proposals 14 and 15). Checked live: proposal 16 paid Sofia 60 tUSDC through Earmark. The testnet DAO runs older Sputnik code that gives Earmark only ~1.4 Tgas in the vote, so the payout ran in a second step (`settle_escalation`, tx `3pjSD9E1…`); the mainnet DAO's code leaves enough to pay inside the vote (sandbox test). **Installed on mainnet** (11 Nov, same code `G3SbqW…ZXtX`) by DAO proposal 4, filed and approved from `/update`.
 - **Retiring Earmark (R23).** `delete_contract` is DAO only. It is refused unless every budget is closed and empty and no DAO vote or held DAO payment is open; it then reads the contract's balance of every allowed token and deletes only if all are zero, since tokens in a deleted account are lost. The NEAR always goes to the DAO.
 - **Request cap.** At most 100 requests per spender per budget period, and no new request while the contract has less than 0.5 NEAR free for storage.
 - **Approvers.** Every spender keeps an approver other than themselves (`no_other_approver`).
@@ -307,6 +307,15 @@ In [`scripts/testnet`](scripts/testnet):
 - `demo.ts setup|history|close` creates the demo DAO, contract and budget, seeds the earlier payouts and refusals, and records each tx in `fixtures/`.
 - `lock.ts` installs a new wasm through a DAO `UpgradeRemote` vote by the fixture's Admin members, records the code hash in the fixture and deletes the contract's keys.
 - `settle.ts [request_id]` records the DAO's decision on escalated requests.
+
+### Mainnet code update
+The Admin's key stays in their wallet. [`scripts/mainnet/upgrade.ts`](scripts/mainnet/upgrade.ts) uses a one-time helper account, with its key on this machine only:
+1. `upgrade.ts helper` makes the helper key and prints its address; send it about 4.4 NEAR.
+2. `upgrade.ts store` sends the contract enough NEAR to keep 0.55 free after the bigger code, then stores the code in the DAO (`store_blob`, about 4.05 NEAR deposit).
+3. The Admin opens `/update` in the app and signs twice: "Ask the council to update" (`UpgradeRemote`), then "Approve update" (300 Tgas). The page shows the running code, the new code and the vote.
+4. `upgrade.ts finish` checks the new code runs, takes the blob deposit back (`remove_blob`) and deletes the helper, sending what's left to `omkar5.near`.
+
+Rehearse first on a copy of the real mainnet state: `cargo test --test sandbox -- --ignored mainnet_upgrade_rehearsal` (needs internet and glibc 2.38, so run it in the `make test-sandbox` Docker image). It copies the contract's code, state and balance and the DAO's state, uses the DAO's exact Sputnik code, runs steps 2–4 and checks every budget, request and record reads the same afterwards.
 - Older spikes: `OWNER=<you>.testnet scripts/testnet/s1-create-envelope.sh` creates a Sputnik DAO, deploys the contract and has the DAO create a budget; `s2-fund-envelope.sh` deploys the test token and has the DAO fund it; `s3-escalate.sh` sends a large request to a DAO vote; `s5-agent-key.sh` gives the spender a temporary key that can only call `request_spend` and shows every other call refused.
 
 ### Reproducible build
@@ -315,7 +324,7 @@ In [`scripts/testnet`](scripts/testnet):
 
 ### Tests
 
-`check_spend_agrees_with_request_spend` runs 15 starting states × 8 amounts and asserts the view predicts exactly what `request_spend` does (tier or reason code). One difference stays by design: an unknown budget id is `closed` in the view and `unknown_envelope` in the call. See [Invariants](#invariants) for the rest.
+`mainnet_upgrade_rehearsal` (sandbox, ignored by default) replays the mainnet code update on a copy of the live state. `check_spend_agrees_with_request_spend` runs 15 starting states × 8 amounts and asserts the view predicts exactly what `request_spend` does (tier or reason code). One difference stays by design: an unknown budget id is `closed` in the view and `unknown_envelope` in the call. See [Invariants](#invariants) for the rest.
 
 ### CI
 

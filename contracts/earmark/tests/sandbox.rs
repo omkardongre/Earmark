@@ -637,3 +637,169 @@ async fn dao_vote_pays_through_earmark() -> TestResult {
     assert_eq!(payee["paid_total"], "300");
     Ok(())
 }
+
+/// Dress rehearsal of the mainnet upgrade on a copy of the real accounts. Needs internet, so it
+/// runs only on request: `cargo test --test sandbox -- --ignored mainnet_upgrade_rehearsal`.
+/// Copies `budgets.omkar5.near` (code, state, balance) and the treasury's state from mainnet,
+/// with the treasury's exact Sputnik code. Then runs the real steps: a helper stores the blob,
+/// `omkar5.near` files `UpgradeRemote` and approves it, the helper removes the blob. Checks the
+/// new code runs, every budget, request and record reads the same, and the blob deposit came back.
+#[tokio::test]
+#[ignore]
+async fn mainnet_upgrade_rehearsal() -> TestResult {
+    const MAINNET: &str = "https://rpc.mainnet.fastnear.com";
+    let contract: AccountId = "budgets.omkar5.near".parse()?;
+    let dao: AccountId = "earmark.sputnik-dao.near".parse()?;
+    let accounts: Vec<GenesisAccount> = ["omkar5.near", "helper.near", dao.as_str()]
+        .iter()
+        .map(|n| GenesisAccount::default_with_name(n.parse().unwrap()))
+        .collect();
+    let sandbox = Sandbox::start_sandbox_with_config(SandboxConfig {
+        additional_accounts: accounts.clone(),
+        ..Default::default()
+    })
+    .await?;
+    let net = NetworkConfig::from_rpc_url("sandbox", sandbox.rpc_addr.parse()?);
+    let actors = accounts.iter().map(actor).collect::<TestResult<Vec<_>>>()?;
+    let [admin, helper, treasury] = <[Actor; 3]>::try_from(actors).map_err(|_| "three actors")?;
+    let zero = NearToken::from_near(0);
+
+    // The treasury: its exact Sputnik code, then its mainnet state (policy, proposals).
+    Contract::deploy(dao.clone())
+        .use_code(sputnik_wasm()?)
+        .without_init_call()
+        .with_signer(treasury.signer.clone())
+        .send_to(&net)
+        .await?
+        .into_result()?;
+    sandbox
+        .patch_state(dao.clone())
+        .fetch_from(MAINNET, near_sandbox::FetchData::NONE.storage())
+        .await?
+        .send()
+        .await?;
+    sandbox
+        .import_account(MAINNET, contract.clone())
+        .with_storage()
+        .send()
+        .await?;
+
+    let new_code = wasm("earmark")?;
+    let new_hash = near_sdk::bs58::encode(near_sdk::env::sha256(&new_code)).into_string();
+    let code_hash = |id: AccountId| {
+        let net = net.clone();
+        async move { TestResult::Ok(Account(id).view().fetch_from(&net).await?.data) }
+    };
+    let before_account = code_hash(contract.clone()).await?;
+    let runs = |a: &near_api::types::Account| format!("{:?}", a.contract_state).contains(&new_hash);
+    assert!(!runs(&before_account), "already upgraded");
+
+    // Everything the app reads, before the upgrade.
+    let people = [
+        "lead.omkar5.near",
+        "writer.omkar5.near",
+        "designer.omkar5.near",
+    ];
+    let snapshot = || async {
+        let mut all = vec![
+            view(&net, &contract, "get_config", json!({})).await?,
+            view(&net, &contract, "list_envelopes", json!({})).await?,
+            view(
+                &net,
+                &contract,
+                "list_requests",
+                json!({ "envelope_id": "0" }),
+            )
+            .await?,
+            view(&net, &contract, "list_queued", json!({})).await?,
+        ];
+        for p in people {
+            all.push(view(&net, &contract, "get_record", json!({ "account_id": p })).await?);
+            let payee = json!({ "account_id": p });
+            all.push(view(&net, &contract, "get_payee_record", payee).await?);
+        }
+        TestResult::Ok(all)
+    };
+    let before = snapshot().await?;
+
+    // 1. The helper stores the new code in the treasury (raw bytes, deposit per byte).
+    let helper_start = code_hash(helper.id.clone()).await?.amount;
+    let deposit = NearToken::from_yoctonear(10u128.pow(19) * (new_code.len() as u128 + 32));
+    Contract(dao.clone())
+        .call_function_raw("store_blob", new_code.clone())
+        .transaction()
+        .gas(NearGas::from_tgas(300))
+        .deposit(deposit)
+        .with_signer(helper.id.clone(), helper.signer.clone())
+        .send_to(&net)
+        .await?
+        .into_result()?;
+
+    // 2. omkar5.near files the upgrade and approves it, as the wallet will (300 Tgas).
+    let policy = view(&net, &dao, "get_policy", json!({})).await?;
+    let bond: u128 = policy["proposal_bond"].as_str().unwrap_or("0").parse()?;
+    let id = view(&net, &dao, "get_last_proposal_id", json!({})).await?;
+    let proposal = json!({ "proposal": {
+        "description": "* Title: Upgrade Earmark contract",
+        "kind": { "UpgradeRemote": { "receiver_id": contract, "method_name": "upgrade", "hash": new_hash } },
+    }});
+    let bond = NearToken::from_yoctonear(bond);
+    call(&net, &admin, &dao, "add_proposal", proposal, bond).await?;
+    vote(&net, &admin, &dao, &json!(id.to_string()), 300).await?;
+    let filed = view(&net, &dao, "get_proposal", json!({ "id": id })).await?;
+    assert_eq!(filed["status"], "Approved", "{filed}");
+
+    // The new code runs and reads every budget, request and record the same.
+    let after_account = code_hash(contract.clone()).await?;
+    assert!(
+        runs(&after_account),
+        "code not replaced: {:?}",
+        after_account.contract_state
+    );
+    let after = snapshot().await?;
+    for (old, new) in before.iter().zip(&after) {
+        assert_subset(old, new);
+    }
+
+    // 3. The helper takes the blob back and gets the deposit.
+    let remove = json!({ "hash": new_hash });
+    call(&net, &helper, &dao, "remove_blob", remove, zero).await?;
+    let helper_end = code_hash(helper.id.clone()).await?.amount;
+    let spent = helper_start.saturating_sub(helper_end);
+    assert!(spent < NearToken::from_millinear(50), "helper lost {spent}");
+
+    let free = after_account
+        .amount
+        .saturating_sub(NearToken::from_yoctonear(
+            10u128.pow(19) * u128::from(after_account.storage_usage),
+        ));
+    println!(
+        "helper spent {spent}; contract free NEAR after upgrade {free} (before {}); storage {} -> {}",
+        before_account
+            .amount
+            .saturating_sub(NearToken::from_yoctonear(
+                10u128.pow(19) * u128::from(before_account.storage_usage)
+            )),
+        before_account.storage_usage,
+        after_account.storage_usage
+    );
+    Ok(())
+}
+
+/// Every field the old code returned is still there with the same value (new fields may appear).
+fn assert_subset(old: &Value, new: &Value) {
+    match (old, new) {
+        (Value::Object(o), Value::Object(n)) => {
+            for (k, v) in o {
+                assert_subset(v, n.get(k).unwrap_or(&Value::Null));
+            }
+        }
+        (Value::Array(o), Value::Array(n)) => {
+            assert_eq!(o.len(), n.len(), "list length changed: {old} -> {new}");
+            for (a, b) in o.iter().zip(n) {
+                assert_subset(a, b);
+            }
+        }
+        _ => assert_eq!(old, new),
+    }
+}
