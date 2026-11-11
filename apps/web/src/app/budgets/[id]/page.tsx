@@ -5,12 +5,19 @@ import { BudgetCard } from "@/components/budget-card";
 import { PaymentsTable } from "@/components/payments-table";
 import { Disclosure, Person, Pill, Section } from "@/components/ui";
 import { loadActivity, loadBase } from "@/lib/data";
-import { duration, money } from "@/lib/format";
+import { duration, money, shortName } from "@/lib/format";
 import { listRequests } from "@/lib/near";
+import { readPrefill } from "@/lib/request-link";
 
 export const dynamic = "force-dynamic";
 
-export default async function BudgetPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function BudgetPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
   if (!/^\d+$/.test(id)) notFound();
   const base = await loadBase();
@@ -22,6 +29,7 @@ export default async function BudgetPage({ params }: { params: Promise<{ id: str
     loadActivity(base, { budget: id, skipPayments: true }),
   ]);
   const period = duration(Number(b.period_secs));
+  const prefill = b.closed ? null : readPrefill(await searchParams, b.payees, m);
 
   return (
     <div className="space-y-10">
@@ -32,9 +40,19 @@ export default async function BudgetPage({ params }: { params: Promise<{ id: str
         <h1 className="mt-1 text-3xl font-bold tracking-tight">{b.name}</h1>
       </div>
 
+      {prefill && (
+        <p className="rounded-2xl bg-brand-soft px-5 py-4">
+          <span className="font-semibold">{shortName(prefill.payee)}</span> asks to be paid{" "}
+          <span className="tabular font-semibold">
+            {prefill.amount} {m.symbol}
+          </span>
+          . A lead of this budget reviews it in the pay form.
+        </p>
+      )}
+
       <div className="grid items-start gap-8 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-4 lg:order-2">
-          <BudgetCard b={b} m={m} link={false} period={period} />
+          <BudgetCard b={b} m={m} link={false} period={period} prefill={prefill} />
           <Disclosure title="How payments work">
             <div className="divide-y divide-line">
               <Rule tone="green" title="Paid at once">

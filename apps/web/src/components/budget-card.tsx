@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { money, units } from "@/lib/format";
+import type { PayPrefill } from "@/lib/request-link";
 import type { Budget, TokenMeta } from "@/lib/types";
 import { AnimatedNumber } from "./animated-number";
 import { ApproveBadge } from "./approve-badge";
 import { PaySheet } from "./pay-sheet";
+import { AskButton } from "./request-form";
 import { ButtonLink, Card, Pill } from "./ui";
 
 /** The one thing a lead checks first: what's left, and a button to pay. */
@@ -12,12 +14,15 @@ export function BudgetCard({
   m,
   link = true,
   period,
+  prefill = null,
 }: {
   b: Budget;
   m: TokenMeta;
   link?: boolean;
   /** "30 days": also shows what was used this period, for the budget page. */
   period?: string;
+  /** From an "Ask to be paid" link (budget page only). */
+  prefill?: PayPrefill | null;
 }) {
   // The bar is what's left of everything the budget ever got: held now plus already paid out.
   // (`balance` alone equals `available` when nothing waits, which drew a full bar.)
@@ -82,7 +87,9 @@ export function BudgetCard({
             payees={b.payees}
             spenders={b.spenders.map(([a]) => a)}
             meta={m}
+            prefill={prefill}
           />
+          <AskButton budgetId={b.id} payees={b.payees} spenders={b.spenders.map(([a]) => a)} />
           {link && (
             <ButtonLink href={`/budgets/${b.id}`} variant="secondary">
               View budget

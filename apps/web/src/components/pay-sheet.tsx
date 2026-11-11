@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CONTRACT, txUrl } from "@/lib/config";
 import { BLOCKED, shortName, toBase } from "@/lib/format";
 import { view } from "@/lib/near";
+import type { PayPrefill } from "@/lib/request-link";
 import { isAccountId, nearAmount, storageBalanceOf, storageBounds } from "@/lib/token";
 import type { BlockReason, RequestStatus, Tier, TokenMeta } from "@/lib/types";
 import { Avatar, Button, ButtonLink, ExternalLink, Pill } from "./ui";
@@ -63,6 +64,7 @@ export function PaySheet({
   payees,
   spenders,
   meta,
+  prefill = null,
 }: {
   budgetId: string;
   /** The budget's token: payees must be registered with it (NEP-145) to receive payments. */
@@ -70,6 +72,8 @@ export function PaySheet({
   payees: string[];
   spenders: string[];
   meta: TokenMeta;
+  /** From an "Ask to be paid" link: opens the form filled in, once, for a spender. */
+  prefill?: PayPrefill | null;
 }) {
   const { accountId, connect, call } = useWallet();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -110,6 +114,18 @@ export function PaySheet({
     }, 300);
     return () => clearTimeout(t);
   }, [accountId, budgetId, payee, base, work]);
+
+  // A request link fills the form and opens it once the lead is signed in. The link is dropped
+  // from the address bar, so a reload doesn't open it again; nothing is sent until they confirm.
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (!prefill || prefilled.current || !accountId || !spenders.includes(accountId)) return;
+    prefilled.current = true;
+    setDraft(prefill);
+    requestId.current = newId();
+    window.history.replaceState(null, "", window.location.pathname);
+    dialog.current?.showModal();
+  }, [prefill, accountId, spenders]);
 
   // Signed in but not a spender here: nothing to pay with.
   if (accountId && !spenders.includes(accountId)) return null;
