@@ -111,6 +111,15 @@ export function activityFeed(
   // Keys must stay the same across fetches (the feed merges a refreshed first page into what's
   // loaded), so they come from the transaction and the event, not the position in the page.
   const seen = new Map<string, number>();
+  // `change_cancelled` names only the change id (no budget, so it gets no row of its own): the
+  // proposal's row says "Cancelled" instead.
+  const cancelled = new Set(
+    events.flatMap((e) =>
+      e.event === "change_cancelled" && typeof e.data.change_id === "string"
+        ? [e.data.change_id]
+        : [],
+    ),
+  );
   events.forEach((e) => {
     const base = `${e.tx}-${e.event}`;
     const nth = seen.get(base) ?? 0;
@@ -232,8 +241,9 @@ export function activityFeed(
           text: `${name("queued_by")} proposed: ${describeChange(change, meta)}`,
           amount: null,
           // Once the change applies, its own "Now in effect" row says so: no stale chip here.
-          chip:
-            waiting?.has(str("change_id")) === true
+          chip: cancelled.has(str("change_id"))
+            ? { label: "Cancelled", tone: "gray" }
+            : waiting?.has(str("change_id")) === true
               ? { label: "Waiting period", tone: "amber" }
               : null,
         };

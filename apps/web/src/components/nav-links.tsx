@@ -34,6 +34,14 @@ export function NavLinks({
     window.addEventListener(CHANGED, reload);
     return () => window.removeEventListener(CHANGED, reload);
   }, []);
+  // Signing in reads it again too: someone made an approver since the page loaded gets the tab.
+  useEffect(() => {
+    if (!accountId) return;
+    fetch("/api/queue", { cache: "no-store" })
+      .then((res) => (res.ok ? (res.json() as Promise<Record<string, number>>) : null))
+      .then((q) => q && setQueue(q))
+      .catch(() => {});
+  }, [accountId]);
   const waiting = accountId ? queue[accountId] : undefined;
   const links = [
     { href: "/", label: "Budgets" },

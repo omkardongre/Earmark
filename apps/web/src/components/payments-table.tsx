@@ -162,8 +162,9 @@ export function PaymentsTable({
           </button>
         ))}
       </fieldset>
-      <Card>
-        <div className="hidden grid-cols-[1fr_7rem_8rem_8.5rem] gap-4 border-b border-line px-5 py-2.5 text-sm font-medium text-muted sm:grid">
+      {/* The layout follows the card's own width (beside the budget card it is narrow). */}
+      <Card className="@container">
+        <div className="hidden grid-cols-[minmax(0,1fr)_6rem_7rem_7.5rem] gap-4 border-b border-line px-5 py-2.5 text-sm font-medium text-muted @xl:grid">
           <span>Payee</span>
           <span>Asked</span>
           <span className="text-right">Amount</span>
@@ -181,27 +182,27 @@ export function PaymentsTable({
                 <li key={id}>
                   <Link
                     href={`/payments/${id}`}
-                    className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 px-5 py-3.5 hover:bg-slate-50 sm:grid-cols-[1fr_7rem_8rem_8.5rem]"
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-5 py-3.5 hover:bg-slate-50 @xl:grid-cols-[minmax(0,1fr)_6rem_7rem_7.5rem]"
                   >
                     <span className="flex min-w-0 items-center gap-3">
                       <Avatar id={r.payee} />
                       <span className="min-w-0">
-                        <span className="block font-medium [overflow-wrap:anywhere]">
+                        <span className="block truncate font-medium" title={r.payee}>
                           {shortName(r.payee)}
                         </span>
                         <span className="block truncate text-sm text-muted">
                           by {shortName(r.spender)}
-                          <span className="sm:hidden"> · {ago(r.created_at_ns)}</span>
+                          <span className="@xl:hidden"> · {ago(r.created_at_ns)}</span>
                         </span>
                       </span>
                     </span>
-                    <span className="hidden text-sm text-muted sm:block">
+                    <span className="hidden text-sm text-muted @xl:block">
                       {ago(r.created_at_ns)}
                     </span>
                     <span className="tabular text-right font-semibold">
                       {money(r.amount, meta)}
                     </span>
-                    <span className="col-start-2 text-right sm:col-start-auto">
+                    <span className="col-start-2 text-right @xl:col-start-auto">
                       <Pill tone={s.tone}>{s.label}</Pill>
                     </span>
                   </Link>
