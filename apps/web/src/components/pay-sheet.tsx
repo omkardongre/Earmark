@@ -9,7 +9,7 @@ import type { PayPrefill } from "@/lib/request-link";
 import { isAccountId, nearAmount, storageBalanceOf, storageBounds } from "@/lib/token";
 import type { BlockReason, RequestStatus, Tier, TokenMeta } from "@/lib/types";
 import { Avatar, Button, ButtonLink, Pill } from "./ui";
-import { useWallet } from "./wallet";
+import { FeeNote, useWallet } from "./wallet";
 
 type Check = { tier: Tier | null; blocked: BlockReason | null };
 
@@ -387,6 +387,7 @@ export function PaySheet({
                           : `Your wallet signs the request. ${shortName(payee)} is paid if the DAO votes yes.`}
                     </p>
                   )}
+                  <FeeNote />
                 </div>
               </>
             )}

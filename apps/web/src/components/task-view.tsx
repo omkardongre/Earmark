@@ -9,7 +9,7 @@ import { type Team, useRole } from "./roles";
 import { input } from "./setup-form";
 import { useToast } from "./toast";
 import { Button, ButtonLink, Card, ExternalLink, Person, Pill, Spinner, TextButton } from "./ui";
-import { useWallet } from "./wallet";
+import { FeeNote, useWallet } from "./wallet";
 
 type Check = { tier: Tier | null; blocked: BlockReason | null };
 
@@ -433,6 +433,7 @@ function Actions({
           >
             {busy === "claim" ? "Confirm in your wallet…" : "Take this task"}
           </Button>
+          <FeeNote />
           <p className="text-center text-sm text-muted">
             You get {days} to finish. The money is already set aside.
           </p>
@@ -513,6 +514,7 @@ function Actions({
           >
             {busy === "submit" ? "Confirm in your wallet…" : "Send the work"}
           </Button>
+          <FeeNote />
           {quiet(
             <TextButton
               key="g"
@@ -681,6 +683,7 @@ function Actions({
                 ? "Confirm in your wallet…"
                 : `Accept and pay ${money(task.amount, meta)}`}
             </Button>
+            <FeeNote />
           </>
         )
       ) : (

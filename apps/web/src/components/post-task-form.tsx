@@ -6,7 +6,7 @@ import { money, shortName, toBase } from "@/lib/format";
 import type { TokenMeta } from "@/lib/types";
 import { input } from "./setup-form";
 import { Button } from "./ui";
-import { useWallet } from "./wallet";
+import { FeeNote, useWallet } from "./wallet";
 
 const MAX_TITLE = 100;
 const MAX_LINK = 256;
@@ -198,6 +198,7 @@ export function PostTaskForm({
             ? `Post and set aside ${amount.trim()} ${meta.symbol}`
             : "Post task"}
       </Button>
+      <FeeNote />
       <p className="text-center text-sm text-muted">
         The money stays in the budget until you accept the work, and comes back if you cancel.
       </p>
