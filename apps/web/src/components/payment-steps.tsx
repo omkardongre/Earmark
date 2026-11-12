@@ -43,9 +43,12 @@ export function PaymentSteps({
   }, [waiting, id]);
 
   if (events && events.length > 0) {
+    // A near.com payout logs the credit and then "paid": one step for the reader.
+    const toNearCom = events.some((e) => e.event === "paid_to_intents");
+    const shown = toNearCom ? events.filter((e) => e.event !== "spend_paid") : events;
     return (
       <ol className="space-y-4">
-        {events.map((e) => {
+        {shown.map((e) => {
           const direct = paidByDao && !events.some((x) => x.event === "spend_paid");
           return (
             <li key={`${e.tx}-${e.event}`} className="flex gap-3">
@@ -97,7 +100,7 @@ function step(e: EarmarkEvent, payee: string): string {
     case "spend_failed":
       return `Didn’t go through (${payoutReason(str("reason"))}); nothing was spent`;
     case "paid_to_intents":
-      return `Credited to ${shortName(payee)}’s near.com balance`;
+      return `Paid into ${shortName(payee)}’s near.com balance`;
     case "spend_expired":
       return "Expired without a decision";
     case "escalation_settled":

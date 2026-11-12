@@ -43,6 +43,7 @@ const TIER: Record<
   },
 };
 
+/** `payee` is the short name, with "’s near.com balance" for a near.com payee. */
 type Done = { status: RequestStatus | null; amount: string; payee: string; id: string; tx: string };
 
 const doneText = (d: Done) =>
@@ -192,7 +193,7 @@ export function PaySheet({
       setDone({
         status: (r.value as RequestStatus | null) ?? null,
         amount: `${amount.trim()} ${meta.symbol}`,
-        payee: shortName(payee),
+        payee: `${shortName(payee)}${toNearCom ? "’s near.com balance" : ""}`,
         id,
         tx: r.hash,
       });
@@ -461,7 +462,10 @@ function PayeePicker({
                   {shortName(p)}
                   {nearCom.includes(p) && <Pill tone="blue">near.com</Pill>}
                 </span>
-                <span className="block break-all text-sm text-muted">{p}</span>
+                {/* The full account only for the one picked: enough to check it, not a wall of 0x… */}
+                {value === p && p !== shortName(p) && (
+                  <span className="block break-all text-sm text-muted">{p}</span>
+                )}
               </span>
             </label>
           ))

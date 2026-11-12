@@ -4,11 +4,12 @@ import { LocalTime } from "@/components/local-time";
 import { PaymentSteps } from "@/components/payment-steps";
 import { ReceiptButton } from "@/components/receipt-button";
 import { SettleButton } from "@/components/settle-button";
-import { ButtonLink, Card, ExternalLink, Person, Pill } from "@/components/ui";
+import { Card, ExternalLink, Person, Pill } from "@/components/ui";
+import { WithdrawLink } from "@/components/withdraw-link";
 import { proposalUrl, txUrl } from "@/lib/config";
 import { loadBase, requestEvents } from "@/lib/data";
 import { duration, money, payoutReason, STATUS, shortName } from "@/lib/format";
-import { isIntentsRequest, NEAR_COM, nearComBalance } from "@/lib/intents";
+import { isIntentsRequest } from "@/lib/intents";
 import { getProposal, getRequest } from "@/lib/near";
 import type { SpendRequest } from "@/lib/types";
 
@@ -61,12 +62,6 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
       : false;
   // The receipt names the payout itself: the transaction that moved the money.
   const payout = events?.findLast((e) => e.event === "spend_paid");
-  // near.com: what the payee holds there now (a live read; withdrawals lower it).
-  const intents = base.config.intents_contract;
-  const nearComNow =
-    paid && toNearCom && intents
-      ? await nearComBalance(intents, r.payee, b.token_id).catch(() => null)
-      : null;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -100,15 +95,11 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
             <SettleButton requestId={id} payout={r.failure ? "retry" : "first"} />
           )}
           {paid && toNearCom && (
-            <div className="space-y-3 rounded-xl bg-sky-50 px-4 py-3 text-sky-900">
-              <p>
-                Paid into {shortName(r.payee)}’s near.com balance. They withdraw it on near.com with
-                the same wallet, to any chain.
-                {nearComNow !== null && ` Balance there now: ${money(nearComNow, m)}.`}
-              </p>
-              <ButtonLink href={NEAR_COM} variant="secondary" className="print:hidden">
-                Withdraw on near.com
-              </ButtonLink>
+            // What happens next, in one line (the near.com tag above says where it went); the
+            // payee's button sits beside it, so the team view has no empty space.
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-sky-50 px-4 py-3 text-sky-900">
+              <p>They withdraw it on near.com with the same wallet, to any chain.</p>
+              <WithdrawLink payee={r.payee} />
             </div>
           )}
         </div>

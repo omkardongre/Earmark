@@ -26,7 +26,3 @@ export const listIntentsPayees = (budgetId: string) =>
 /** Whether this payment goes (or went) into the payee's near.com balance. */
 export const isIntentsRequest = (requestId: string) =>
   view<boolean>(CONTRACT, "is_intents_request", { request_id: requestId }).catch(() => false);
-
-/** What `account` holds of `token` on near.com (NEP-245 `mt_balance_of` on Intents). */
-export const nearComBalance = (intents: string, account: string, token: string) =>
-  view<string>(intents, "mt_balance_of", { account_id: account, token_id: `nep141:${token}` });
