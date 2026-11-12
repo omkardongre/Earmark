@@ -250,6 +250,29 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 - **App:** Add payee has one box (also on the budget's People list, for approvers). On a contract that can pay near.com, a `0x…` address is always a near.com payee, so a MetaMask address never becomes a plain NEAR payee by mistake; a NEAR account can be paid there by choice ("Pay into their near.com balance instead"). Payees get a near.com tag, and the payment page says "Paid into X's near.com balance", with "Withdraw on near.com" for the payee (hidden for the signed-in team). Earmark's part ends at the credit; it doesn't track the withdrawal.
 - **Gas, measured on testnet** (Intents copy): a payout at once burnt 16.3 Tgas in total and an approval 15.8 Tgas; the app's 100 Tgas covers both.
 
+### Fees paid by Earmark (NEP-366) and Telegram alerts
+
+**Built 12 Nov, testnet** (no contract change: the contract already identifies people by `predecessor_account_id`). Plan: `docs/05-feature-4-8-plan.md`; research 20 and 21. **Not deployed yet.**
+
+**Fees paid by Earmark:**
+- **What it does:** a lead, approver or contributor signs the call in their wallet as a NEP-366 delegate action. `POST /api/relay` sends it from the sponsor account `gas.earmark.testnet`, which pays the gas. The call still runs as the member, so the contract checks their role as usual. The sponsor has no role in any budget or DAO.
+- **What the relay accepts:** one FunctionCall to this deployment's contract, with no deposit, at most 100 Tgas and 2 KB of args. The method must be one the app uses (`lib/relay.ts` `RELAY_METHODS`; not setup, upgrades, DAO-only or close). The sender must be a spender, approver or payee of an open budget, and the signature must check out against one of the sender's keys before anything is sent.
+- **Caps:** per sender a day (50 testnet, 30 mainnet) and in total (1 NEAR testnet, 0.3 mainnet). It stops when the sponsor has under 0.3 NEAR. Counts live in Firestore and count failed calls too. `RELAY_OFF=1` turns it off.
+- **In the app:** with a wallet that signs delegates (Meteor; NEAR Mobile and HOT on mainnet only), the main buttons show "Network fee paid by Earmark". Other wallets work as before. If the relay refuses, the app asks before using the wallet's own NEAR ("Pay the fee myself"). Retries are safe: the contract refuses a repeated request id or work link, and the delegate nonce stops a replay.
+- **Checked on testnet:**
+  - `make relay-smoke APP=http://localhost:3005`: maya asks, priya approves, both relayed (txs `GVHds1…`, `HMmXQW…`);
+  - `APPROVER=carol.earmark.testnet`: carol, with 0.00068 NEAR free, approves and her balance doesn't move (tx `EuEBT7…`);
+  - about 0.0004 NEAR per relayed call.
+
+**Telegram alerts:**
+- **Linking:** on a budget page, "Telegram alerts" → "Add to a team chat" gives a one-time `t.me/<bot>?startgroup=<code>` link. "Mention me" links your NEAR account to your Telegram user, so alerts @mention and DM you. A payment or task page has "Tell me in Telegram".
+- **What gets posted:** the bot posts work to review, payments that need an approver (with who asked and when it expires), rule changes ("can be applied after …, any approver can cancel"), and then edits the same message to "✅ Paid", "Not paid" or "Failed". It sends one reminder 6 h before a payment expires. DAO votes are left to Trezu's own alerts.
+- **The bot has no power:** buttons open Earmark (`/approvals#pay-<id>`), where the wallet signs. Alerts carry only public chain data, so linking needs no wallet signature.
+- **How it runs:** Cloud Scheduler calls `/api/cron/alerts` every minute (header `x-cron-secret`). It reads each open budget fresh (never the page cache), compares it with the last snapshot in Firestore and posts what changed. A new subscription records the current state first, so it isn't flooded with old items. A crash can repeat at most one message, and no money moves. The webhook `/api/telegram` checks Telegram's `secret_token` header.
+- **Checked on testnet with a fake Telegram:** a new 11 tUSDC request posted "✋ … Needs 1 approver" to the group and DMed the linked approver; after lena approved, the same message was edited to "✅ Paid". The real bot waits for its token.
+
+The approval card also shows why you're asked ("More than Maya can pay alone (10 tUSDC). Needs 1 approver."), the budget's money left and held (this payment is already in held), and what this payee was paid from this budget before (`payeeHistory`, this budget only, not `get_payee_record`, which mixes tokens). When the payment came from a task, it says which task and who accepted the work.
+
 Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued for `loosen_delay_secs` (120 s on testnet) and any approver or the DAO can cancel them. Changes that tighten apply at once. `apply_change` refuses a queued change older than 14 days.
 
 ### Safety limits
@@ -340,6 +363,7 @@ In [`scripts/testnet`](scripts/testnet):
 - `lock.ts` installs a new wasm through a DAO `UpgradeRemote` vote by the fixture's Admin members, records the code hash in the fixture and deletes the contract's keys.
 - `settle.ts [request_id]` records the DAO's decision on escalated requests.
 - `intents.ts setup|flow|delete` dry-runs near.com payouts on a throwaway contract (`intents-dev.earmark.testnet`) paying into a copy of the real Intents code (`earmark-intents-a.testnet`, fresh state): add a `0x…` payee, pay at once, pay after an approval, then pause the copy and see the payment fail with the money kept.
+- `relay.ts account|carol|smoke <app>` makes the fee sponsor `gas.earmark.testnet`, makes `carol.earmark.testnet` (almost no NEAR) an approver of budget 0 by DAO vote, and relays one real request and approval through an app (`make relayer-account`, `make relay-smoke`).
 - `tasks.ts setup|flow|delete` dry-runs tasks on a throwaway contract (`tasks-dev.earmark.testnet`, the owner account acts as the DAO): post, claim, send work, accept, then a trusted contributor paid without an approver. Not the demo contracts.
 
 ### Mainnet code update
@@ -358,6 +382,8 @@ Rehearse first on a copy of the real mainnet state: `cargo test --test sandbox -
 
 ### Tests
 
+Web unit tests: `pnpm --dir apps/web test` (Vitest): the relay's checks and the alerts' diff, wording and reminder.
+
 `intents_payout` (sandbox, ignored by default, needs internet) runs a near.com payout against mainnet `intents.near`'s real code: paid at 100 Tgas, then refunded and failed cleanly while Intents is paused. `mainnet_upgrade_rehearsal` (sandbox, ignored by default) replays the mainnet code update on a copy of the live state. `check_spend_agrees_with_request_spend` runs 15 starting states × 8 amounts and asserts the view predicts exactly what `request_spend` does (tier or reason code). One difference stays by design: an unknown budget id is `closed` in the view and `unknown_envelope` in the call. See [Invariants](#invariants) for the rest.
 
 ### CI
@@ -369,6 +395,7 @@ Rehearse first on a copy of the real mainnet state: `cargo test --test sandbox -
 - Cloud Run service `earmark` in project `earmark-near-2026` (`us-central1`). Max 1 instance, scale to zero.
 - Image from [`apps/web/Dockerfile`](apps/web/Dockerfile) (Next.js standalone output, Node 24, non-root), built by Cloud Build ([`apps/web/cloudbuild.yaml`](apps/web/cloudbuild.yaml)). The upload follows [`.gcloudignore`](.gcloudignore), so no `.env` file leaves the machine.
 - The two sandbox keys are Secret Manager secrets `try-lead-key` and `try-council-key`, readable only by the service account `earmark-web`.
+- Features 4 + 8 add Firestore (`(default)`, native, `us-central1`, free tier) for alert links, snapshots, message ids and relay counts. No money record lives there. They also add the secrets `relayer-key` (sponsor `gas.earmark.testnet`), `cron-secret`, `telegram-webhook-secret` and, once the bots exist, `telegram-token` / `telegram-token-mainnet`. `make deploy` passes only the secrets that exist, so a feature without its secret stays off. After a deploy with the bot token, `make alerts-setup [NET=mainnet]` sets the webhook and the every-minute Scheduler job.
 - Mainnet: a second service `earmark-mainnet` from its own image, since `NEXT_PUBLIC_*` settings are compiled in at build time (`make deploy-mainnet`, passed as Docker build args). It has no sandbox keys; "Try it" links to the testnet app. It reads contract `budgets.omkar5.near` (0 keys, code hash `Gqnu9U…RjFz` from commit `faf4c31`), owned by the Trezu treasury `earmark.sputnik-dao.near`, with native USDC. Fund a new contract account with its storage (≈1 NEAR per 100 kB of wasm) plus 0.5 NEAR, the reserve below which it refuses new payments.
 
 ## License

@@ -1,4 +1,4 @@
-.PHONY: install build test test-sandbox lint fmt verify demo web web-build deploy deploy-mainnet try-refill try-scenes try-limits
+.PHONY: install build test test-sandbox lint fmt verify demo web web-build deploy deploy-mainnet alerts-setup relayer-account relay-smoke try-refill try-scenes try-limits
 
 # The sandbox node needs glibc >= 2.38; this image has it on any host with Docker.
 SANDBOX_IMAGE ?= rust:1.97.1-trixie
@@ -50,6 +50,15 @@ web-build:
 GCP_PROJECT ?= earmark-near-2026
 GCP_REGION ?= us-central1
 IMAGE = $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/earmark/web:$(shell git rev-parse --short HEAD)
+TESTNET_APP ?= https://earmark-878141445235.us-central1.run.app
+MAINNET_APP ?= https://earmark-mainnet-878141445235.us-central1.run.app
+# Features 4 + 8 (docs/05): Firestore keeps alert links and relay counts; secrets come from
+# Secret Manager. A secret that doesn't exist yet (the bot token before the bot is made) is left
+# out, and that feature stays off.
+has_secret = $(shell gcloud secrets describe $(1) --project=$(GCP_PROJECT) >/dev/null 2>&1 && echo yes)
+opt_secret = $(if $(call has_secret,$(2)),$(1)=$(2):latest,)
+join_comma = $(subst $(eval) ,$(comma),$(strip $(1)))
+comma := ,
 
 deploy:
 	gcloud builds submit --project=$(GCP_PROJECT) --config apps/web/cloudbuild.yaml \
@@ -57,8 +66,8 @@ deploy:
 	gcloud run deploy earmark --project=$(GCP_PROJECT) --region=$(GCP_REGION) --image=$(IMAGE) \
 		--service-account=earmark-web@$(GCP_PROJECT).iam.gserviceaccount.com --allow-unauthenticated \
 		--port=8080 --cpu=1 --memory=512Mi --concurrency=40 --min-instances=0 --max-instances=1 \
-		--set-env-vars=TRY_CONTRACT=try.earmark.testnet,TRY_LEAD_ACCOUNT=try-lead.earmark.testnet,TRY_COUNCIL_ACCOUNT=try-council.earmark.testnet \
-		--set-secrets=TRY_LEAD_KEY=try-lead-key:latest,TRY_COUNCIL_KEY=try-council-key:latest
+		--set-env-vars=TRY_CONTRACT=try.earmark.testnet,TRY_LEAD_ACCOUNT=try-lead.earmark.testnet,TRY_COUNCIL_ACCOUNT=try-council.earmark.testnet,FIRESTORE=1,APP_URL=$(TESTNET_APP),RELAYER_ACCOUNT=gas.earmark.testnet,TELEGRAM_BOT=$(TESTNET_BOT) \
+		--set-secrets=$(call join_comma,TRY_LEAD_KEY=try-lead-key:latest TRY_COUNCIL_KEY=try-council-key:latest $(call opt_secret,RELAYER_KEY,relayer-key) $(call opt_secret,CRON_SECRET,cron-secret) $(call opt_secret,TELEGRAM_WEBHOOK_SECRET,telegram-webhook-secret) $(call opt_secret,TELEGRAM_TOKEN,telegram-token))
 
 # Mainnet app: its own image (public settings are compiled in) and service, no "Try it" keys.
 MAINNET_CONTRACT ?= budgets.omkar5.near
@@ -72,7 +81,40 @@ deploy-mainnet:
 	gcloud run deploy earmark-mainnet --project=$(GCP_PROJECT) --region=$(GCP_REGION) \
 		--image=$(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/earmark/web:$(MAINNET_TAG) \
 		--service-account=earmark-web@$(GCP_PROJECT).iam.gserviceaccount.com --allow-unauthenticated \
-		--port=8080 --cpu=1 --memory=512Mi --concurrency=40 --min-instances=0 --max-instances=1
+		--port=8080 --cpu=1 --memory=512Mi --concurrency=40 --min-instances=0 --max-instances=1 \
+		--set-env-vars=FIRESTORE=1,APP_URL=$(MAINNET_APP),RELAYER_ACCOUNT=gas.omkar5.near,TELEGRAM_BOT=$(MAINNET_BOT) \
+		$(if $(strip $(MAINNET_SECRETS)),--set-secrets=$(call join_comma,$(MAINNET_SECRETS)),)
+MAINNET_SECRETS = $(call opt_secret,RELAYER_KEY,relayer-key-mainnet) $(call opt_secret,CRON_SECRET,cron-secret) $(call opt_secret,TELEGRAM_WEBHOOK_SECRET,telegram-webhook-secret) $(call opt_secret,TELEGRAM_TOKEN,telegram-token-mainnet)
+
+# Telegram bots (one per app: a bot has one webhook). Pick the names in @BotFather.
+TESTNET_BOT ?= EarmarkTestnetBot
+MAINNET_BOT ?= EarmarkBot
+# Points the bot at the app and runs the alerts watcher every minute (docs/05 §8). Run after a
+# deploy that has the bot token: make alerts-setup [NET=mainnet].
+NET ?= testnet
+alerts-setup:
+	@APP=$(if $(filter mainnet,$(NET)),$(MAINNET_APP),$(TESTNET_APP)); \
+	TOKEN_SECRET=$(if $(filter mainnet,$(NET)),telegram-token-mainnet,telegram-token); \
+	TOKEN=$$(gcloud secrets versions access latest --secret=$$TOKEN_SECRET --project=$(GCP_PROJECT)); \
+	HOOK=$$(gcloud secrets versions access latest --secret=telegram-webhook-secret --project=$(GCP_PROJECT)); \
+	CRON=$$(gcloud secrets versions access latest --secret=cron-secret --project=$(GCP_PROJECT)); \
+	curl -s "https://api.telegram.org/bot$$TOKEN/setWebhook" --data-urlencode "url=$$APP/api/telegram" \
+		--data-urlencode "secret_token=$$HOOK" --data-urlencode 'allowed_updates=["message","my_chat_member"]' \
+		--data-urlencode "drop_pending_updates=true"; echo; \
+	JOB=alerts-$(NET); \
+	if gcloud scheduler jobs describe $$JOB --location=$(GCP_REGION) --project=$(GCP_PROJECT) >/dev/null 2>&1; then OP=update; else OP=create; fi; \
+	gcloud scheduler jobs $$OP http $$JOB --location=$(GCP_REGION) --project=$(GCP_PROJECT) \
+		--schedule="* * * * *" --uri="$$APP/api/cron/alerts" --http-method=POST \
+		--$$( [ $$OP = create ] && echo headers || echo update-headers )="x-cron-secret=$$CRON" \
+		--attempt-deadline=60s --max-retry-attempts=0 >/dev/null && echo "scheduler $$JOB: every minute"
+
+# Fees paid by Earmark (feature 8): makes the testnet sponsor gas.earmark.testnet, and relays
+# one real request + approval through an app's /api/relay (APP=http://localhost:3005 or hosted).
+relayer-account:
+	$(TSX) scripts/testnet/relay.ts account
+relay-smoke:
+	$(TSX) scripts/testnet/relay.ts smoke $(or $(APP),$(TESTNET_APP))
+
 # Tops up the "Try it" sandbox (budget, storage NEAR, signer gas).
 try-refill:
 	$(TSX) scripts/testnet/try.ts refill
