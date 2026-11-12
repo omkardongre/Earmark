@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { TaskView } from "@/components/task-view";
+import { TelegramWatch } from "@/components/telegram-link";
 import { loadBase, requestEvents } from "@/lib/data";
 import { getRequest, getTask, getTrust } from "@/lib/near";
+import { alertsOn } from "@/lib/telegram";
 
 export const metadata: Metadata = { title: "Task · Earmark" };
 export const dynamic = "force-dynamic";
@@ -49,6 +51,11 @@ export default async function TaskPage({
         team={{ spenders: b.spenders.map(([a]) => a), approvers: b.approvers, payees: b.payees }}
         meta={m}
       />
+      {alertsOn() && task.status !== "paid" && task.status !== "cancelled" && (
+        <div className="text-center">
+          <TelegramWatch taskId={taskId} />
+        </div>
+      )}
     </div>
   );
 }

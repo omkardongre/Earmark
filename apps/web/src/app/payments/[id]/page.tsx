@@ -4,6 +4,7 @@ import { LocalTime } from "@/components/local-time";
 import { PaymentSteps } from "@/components/payment-steps";
 import { ReceiptButton } from "@/components/receipt-button";
 import { SettleButton } from "@/components/settle-button";
+import { TelegramWatch } from "@/components/telegram-link";
 import { Card, ExternalLink, Person, Pill } from "@/components/ui";
 import { WithdrawLink } from "@/components/withdraw-link";
 import { proposalUrl, txUrl } from "@/lib/config";
@@ -11,6 +12,7 @@ import { loadBase, requestEvents } from "@/lib/data";
 import { duration, money, payoutReason, STATUS, shortName } from "@/lib/format";
 import { isIntentsRequest } from "@/lib/intents";
 import { getProposal, getRequest } from "@/lib/near";
+import { alertsOn } from "@/lib/telegram";
 import type { SpendRequest } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -88,6 +90,11 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
             {toNearCom && <Pill tone="blue">near.com</Pill>} · asked by <Person id={r.spender} />
           </p>
           {next && <p className="rounded-xl bg-amber-50 px-4 py-3 text-amber-900">{next}</p>}
+          {next && alertsOn() && (
+            <div className="-ml-3 print:hidden">
+              <TelegramWatch requestId={id} />
+            </div>
+          )}
           {r.status === "escalated" && r.dao_proposal_id !== null && !voteOpen && (
             <SettleButton requestId={id} />
           )}

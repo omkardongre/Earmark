@@ -8,12 +8,14 @@ import { BudgetPayments } from "@/components/role-views";
 import { ForRoles } from "@/components/roles";
 import { TasksEmpty } from "@/components/task-board";
 import { ACTIVE, TaskList } from "@/components/task-list";
+import { TelegramAlerts } from "@/components/telegram-link";
 import { Disclosure, Person, Pill, Section } from "@/components/ui";
 import { loadActivity, loadBase, paidByPayee } from "@/lib/data";
 import { duration, money } from "@/lib/format";
 import { listIntentsPayees } from "@/lib/intents";
 import { listRequests, listTasks } from "@/lib/near";
 import { readPrefill } from "@/lib/request-link";
+import { alertsOn } from "@/lib/telegram";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +126,11 @@ export default async function BudgetPage({
               </Group>
             </div>
           </Disclosure>
+          {alertsOn() && !b.closed && (
+            <Disclosure title="Telegram alerts">
+              <TelegramAlerts budgetId={id} />
+            </Disclosure>
+          )}
         </div>
 
         <div className="min-w-0 space-y-10 lg:order-1">
