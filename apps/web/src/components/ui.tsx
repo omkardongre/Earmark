@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
-import { shortName } from "@/lib/format";
+import { isWalletAddress, shortName } from "@/lib/format";
 
 export type Tone = "green" | "amber" | "blue" | "gray" | "red" | "brand";
 
@@ -233,8 +233,30 @@ export function Avatar({ id, size = "sm" }: { id: string; size?: "sm" | "lg" }) 
       }`}
       aria-hidden
     >
-      {name.slice(0, 1)}
+      {isWalletAddress(id) ? (
+        <WalletIcon className={size === "lg" ? "size-6" : "size-4"} />
+      ) : (
+        name.slice(0, 1)
+      )}
     </span>
+  );
+}
+
+/** A wallet (MetaMask and others): their `0x…` address has no name to take a letter from. */
+function WalletIcon({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      className={className}
+    >
+      <title>Wallet</title>
+      <path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+      <path d="M21 12V9a2 2 0 0 0-2-2H5a2 2 0 0 1 0-4" />
+      <path d="M21 12h-4a2 2 0 0 0 0 4h4v-4Z" />
+    </svg>
   );
 }
 

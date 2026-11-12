@@ -27,10 +27,13 @@ export function toBase(input: string, meta: TokenMeta): string | null {
  * "sofia-reyes.earmark.testnet" -> "Sofia Reyes": the name people read. The full account is kept
  * in titles, links and wherever the exact account matters (the pay sheet, the wallet).
  */
+/** A wallet address as near.com shows it (MetaMask and other EVM wallets): lowercase `0x` + 40 hex. */
+export const isWalletAddress = (s: string) => /^0x[0-9a-f]{40}$/.test(s);
+
 export function shortName(account: string): string {
   if (account.length === 64) return `${account.slice(0, 6)}…${account.slice(-4)}`;
   // A wallet address on near.com (MetaMask and others): "0x8ba1…ba72".
-  if (/^0x[0-9a-f]{40}$/.test(account)) return `${account.slice(0, 6)}…${account.slice(-4)}`;
+  if (isWalletAddress(account)) return `${account.slice(0, 6)}…${account.slice(-4)}`;
   const first = account.split(".")[0] ?? account;
   return first
     .split(/[-_]+/)

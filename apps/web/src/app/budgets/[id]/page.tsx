@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/activity-list";
 import { BudgetCard } from "@/components/budget-card";
+import { BudgetAddPayee } from "@/components/inbox";
 import { RequestBanner } from "@/components/request-form";
 import { BudgetPayments } from "@/components/role-views";
 import { ForRoles } from "@/components/roles";
@@ -112,6 +113,14 @@ export default async function BudgetPage({
                     {nearCom.includes(p) && <Pill tone="blue">near.com</Pill>}
                   </span>
                 ))}
+                {!b.closed && (
+                  <BudgetAddPayee
+                    budgetId={id}
+                    symbol={m.symbol}
+                    approvers={b.approvers}
+                    delaySecs={Number(base.config.loosen_delay_secs)}
+                  />
+                )}
               </Group>
             </div>
           </Disclosure>
