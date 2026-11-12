@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   // Self-contained server for the container image (apps/web/Dockerfile); tracing starts at the
   // workspace root so pnpm's linked packages are included.
   output: "standalone",
+  // Firestore's gRPC client doesn't bundle; load it from node_modules (lib/store.ts).
+  serverExternalPackages: ["@google-cloud/firestore"],
   outputFileTracingRoot: fileURLToPath(new URL("../..", import.meta.url)),
 };
 
