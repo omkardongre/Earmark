@@ -23,9 +23,19 @@ export function Pill({ tone = "gray", children }: { tone?: Tone; children: React
   );
 }
 
-export function Card({ className = "", children }: { className?: string; children: ReactNode }) {
+export function Card({
+  className = "",
+  id,
+  children,
+}: {
+  className?: string;
+  /** An anchor, so a link (a Telegram alert) can open this card. */
+  id?: string;
+  children: ReactNode;
+}) {
   return (
     <div
+      id={id}
       className={`rounded-2xl border border-line bg-white shadow-card print:shadow-none ${className}`}
     >
       {children}

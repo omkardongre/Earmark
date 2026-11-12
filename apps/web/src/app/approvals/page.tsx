@@ -1,16 +1,70 @@
 import { Inbox, type InboxBudget } from "@/components/inbox";
 import { describeChange } from "@/lib/activity";
 import { CONTRACT } from "@/lib/config";
-import { loadBase, loadDecisions, loadPauses, loadRequests } from "@/lib/data";
-import { money } from "@/lib/format";
+import { loadBase, loadDecisions, loadPauses, loadRequests, payeeHistory } from "@/lib/data";
+import { money, shortName } from "@/lib/format";
 import { listIntentsPayees } from "@/lib/intents";
-import { contractTopUp, getRequest, isEligible, listQueued } from "@/lib/near";
+import { contractTopUp, getRequest, getTrust, isEligible, listQueued, listTasks } from "@/lib/near";
 import { nearAmount } from "@/lib/token";
+import type { Budget, SpendRequest, Task, TokenMeta } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 /** Decided payments shown under "Recently decided", per budget. */
 const RECENT = 3;
+
+/** What an approver needs to decide one payment (docs/05 §5): why they're asked, and history. */
+async function context(
+  budgets: Budget[],
+  requests: Map<string, SpendRequest>,
+  meta: Map<string, TokenMeta>,
+) {
+  const out = new Map<
+    string,
+    { why: string; history: string; task?: { id: string; title: string; lead: string } }
+  >();
+  await Promise.all(
+    budgets
+      .filter((b) => !b.closed && b.pending_requests.length > 0)
+      .map(async (b) => {
+        const m = meta.get(b.id);
+        if (!m) return;
+        const [history, tasks] = await Promise.all([
+          payeeHistory(b),
+          listTasks(b.id, { limit: 100 }).catch(() => null),
+        ]);
+        const byRequest = new Map<string, [string, Task]>(
+          (tasks ?? []).flatMap(([id, t]) => (t.request_id ? [[t.request_id, [id, t]]] : [])),
+        );
+        await Promise.all(
+          b.pending_requests.map(async (rid) => {
+            const r = requests.get(rid);
+            if (!r) return;
+            const task = byRequest.get(rid);
+            let limit = BigInt(b.spenders.find(([a]) => a === r.spender)?.[1].auto_limit ?? "0");
+            // A trusted contributor's task can pay at once up to the DAO's trusted limit.
+            if (task) {
+              const trust = await getTrust(b.id, r.payee).catch(() => null);
+              if (trust?.trusted && BigInt(trust.trusted_limit) > limit)
+                limit = BigInt(trust.trusted_limit);
+            }
+            const h = history[r.payee];
+            out.set(rid, {
+              why:
+                limit > 0n
+                  ? `More than ${shortName(r.spender)} can pay alone (${money(limit, m)}). Needs 1 approver.`
+                  : `${shortName(r.spender)} can’t pay alone from this budget. Needs 1 approver.`,
+              history: h
+                ? `${shortName(r.payee)} was paid ${h.count === 1 ? "once" : `${h.count} times`} here, ${money(h.total, m)} in all.`
+                : `First payment to ${shortName(r.payee)} from this budget.`,
+              ...(task ? { task: { id: task[0], title: task[1].title, lead: task[1].lead } } : {}),
+            });
+          }),
+        );
+      }),
+  );
+  return out;
+}
 
 export default async function ApprovalsPage() {
   const { config, budgets, meta } = await loadBase();
@@ -29,7 +83,7 @@ export default async function ApprovalsPage() {
       ...b.spenders.filter(([, l]) => l.paused).map(([a]) => `${b.id}|${a}`),
     ]),
   );
-  const [queued, pauses, decisions, topUp, nearCom] = await Promise.all([
+  const [queued, pauses, decisions, topUp, nearCom, why] = await Promise.all([
     listQueued(),
     loadPauses(pausedKeys),
     loadDecisions(),
@@ -37,6 +91,7 @@ export default async function ApprovalsPage() {
     Promise.all(open.map(async (b) => [b.id, await listIntentsPayees(b.id)] as const)).then(
       (rows) => new Map(rows),
     ),
+    context(open, requests, meta),
   ]);
   const spenders = [...new Set(open.flatMap((b) => b.spenders.map(([a]) => a)))];
   const eligible = new Map(
@@ -60,6 +115,9 @@ export default async function ApprovalsPage() {
         symbol: m.symbol,
         decimals: m.decimals,
         ceiling: money(b.raise_ceiling, m),
+        left: money(b.available, m),
+        held: money(b.committed, m),
+        sending: BigInt(b.in_flight) > 0n ? money(b.in_flight, m) : null,
         pending: b.pending_requests.flatMap((rid) => {
           const r = requests.get(rid);
           return r
@@ -76,6 +134,7 @@ export default async function ApprovalsPage() {
                     BigInt(r.created_at_ns) +
                     BigInt(b.pending_ttl_secs) * 1_000_000_000n
                   ).toString(),
+                  ...why.get(rid),
                 },
               ]
             : [];

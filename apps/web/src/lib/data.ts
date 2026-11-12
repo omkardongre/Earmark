@@ -32,16 +32,32 @@ export async function loadBase(): Promise<Base> {
  * 1,000, 100 per call). Never throws: on a read problem the "You earned" line just doesn't show.
  */
 export async function paidByPayee(b: Budget): Promise<Record<string, string>> {
+  const h = await payeeHistory(b);
+  return Object.fromEntries(Object.entries(h).map(([k, v]) => [k, v.total]));
+}
+
+/**
+ * How many times and how much each payee was paid from this budget only (one token), from up to
+ * 1,000 requests. `get_payee_record` mixes budgets and tokens, so the approval card uses this.
+ * Never throws: on a read problem it's empty and the card leaves the line out.
+ */
+export async function payeeHistory(
+  b: Budget,
+): Promise<Record<string, { count: number; total: string }>> {
   const pages = Math.ceil(Math.min(Number(b.request_count), 1000) / 100);
   try {
     const lists = await Promise.all(
       Array.from({ length: pages }, (_, i) => listRequests(b.id, { from: i * 100, limit: 100 })),
     );
-    const out = new Map<string, bigint>();
-    for (const [, r] of lists.flat())
-      if (r.status === "paid" || r.status === "paid_by_dao")
-        out.set(r.payee, (out.get(r.payee) ?? 0n) + BigInt(r.amount));
-    return Object.fromEntries([...out].map(([k, v]) => [k, v.toString()]));
+    const out = new Map<string, { count: number; total: bigint }>();
+    for (const [, r] of lists.flat()) {
+      if (r.status !== "paid" && r.status !== "paid_by_dao") continue;
+      const h = out.get(r.payee) ?? { count: 0, total: 0n };
+      out.set(r.payee, { count: h.count + 1, total: h.total + BigInt(r.amount) });
+    }
+    return Object.fromEntries(
+      [...out].map(([k, v]) => [k, { count: v.count, total: v.total.toString() }]),
+    );
   } catch {
     return {};
   }

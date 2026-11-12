@@ -21,7 +21,7 @@ import {
   Pill,
   Section,
 } from "./ui";
-import { useWallet } from "./wallet";
+import { FeeNote, useWallet } from "./wallet";
 
 export type InboxBudget = {
   id: string;
@@ -33,6 +33,10 @@ export type InboxBudget = {
   symbol: string;
   decimals: number;
   ceiling: string;
+  /** Free to spend, set aside (pending payments and tasks), and on its way to payees. */
+  left: string;
+  held: string;
+  sending: string | null;
   pending: {
     id: string;
     spender: string;
@@ -42,6 +46,10 @@ export type InboxBudget = {
     memo: string;
     createdNs: string;
     expiresNs: string;
+    /** Why this approver is asked, the payee's history here, and the task it came from. */
+    why?: string;
+    history?: string;
+    task?: { id: string; title: string; lead: string };
   }[];
   recent: Recent[];
   changes: {
@@ -147,6 +155,17 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
   } | null>(null);
   const live = now - local.at < KEEP_MS ? local : null;
   const controlsOpen = useRef(false);
+  // A Telegram alert opens /approvals#pay-<id>: once the cards show (after sign-in), go there.
+  const [linked, setLinked] = useState<string | null>(null);
+  useEffect(() => {
+    if (!accountId || linked !== null) return;
+    const hash = window.location.hash.slice(1);
+    if (!hash.startsWith("pay-")) return setLinked("");
+    const el = document.getElementById(hash);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    setLinked(hash);
+  });
 
   if (!accountId) {
     return (
@@ -349,7 +368,11 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
               const own = p.spender === accountId;
               const left = countdown(nsToMs(p.expiresNs), now);
               return (
-                <Card key={p.id} className="flex flex-col gap-4 p-5">
+                <Card
+                  key={p.id}
+                  id={`pay-${p.id}`}
+                  className={`flex scroll-mt-24 flex-col gap-4 p-5 ${linked === `pay-${p.id}` ? "ring-2 ring-brand" : ""}`}
+                >
                   <div className="space-y-1">
                     <p className="text-sm text-muted">{p.budget.name}</p>
                     <p className="tabular text-3xl font-bold tracking-tight">{p.amount}</p>
@@ -368,7 +391,28 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                       )}
                     </p>
                     {p.memo && <p className="text-muted">“{p.memo}”</p>}
-                    <p className="text-sm text-muted">
+                    {p.task && (
+                      <p className="text-sm text-muted">
+                        From task{" "}
+                        <Link
+                          className="font-medium text-brand hover:underline"
+                          href={`/budgets/${p.budget.id}/tasks/${p.task.id}`}
+                        >
+                          {p.task.title}
+                        </Link>
+                        . {shortName(p.task.lead)} accepted the work.
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1 rounded-xl bg-slate-50 px-3.5 py-3 text-sm">
+                    {p.why && <p className="font-medium">{p.why}</p>}
+                    <p className="text-muted">
+                      {/* This payment is already in Held, so Left doesn't drop again. */}
+                      Left {p.budget.left} · Held {p.budget.held} (this one included)
+                      {p.budget.sending ? ` · Sending ${p.budget.sending}` : ""}
+                    </p>
+                    {p.history && <p className="text-muted">{p.history}</p>}
+                    <p className="text-muted">
                       {ago(p.createdNs)} · {left ? `expires in ${left}` : "expired"}
                     </p>
                   </div>
@@ -418,6 +462,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                       </>
                     )}
                   </div>
+                  {!own && left && <FeeNote className="-mt-2" />}
                 </Card>
               );
             })}
