@@ -1,4 +1,4 @@
-.PHONY: install build test test-sandbox lint fmt verify demo web web-build deploy deploy-mainnet alerts-setup relayer-account relay-smoke try-refill try-scenes try-limits
+.PHONY: install build test test-sandbox lint fmt verify demo web web-build deploy deploy-mainnet alerts-setup relayer-account relay-smoke relay-ask try-refill try-scenes try-limits
 
 # The sandbox node needs glibc >= 2.38; this image has it on any host with Docker.
 SANDBOX_IMAGE ?= rust:1.97.1-trixie
@@ -49,7 +49,10 @@ web-build:
 # Manager (try-lead-key, try-council-key); see README "Hosting".
 GCP_PROJECT ?= earmark-near-2026
 GCP_REGION ?= us-central1
-IMAGE = $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/earmark/web:$(shell git rev-parse --short HEAD)
+# Image tag: the commit, plus "-dirty-<time>" when the tree has uncommitted changes, so a test
+# deploy never overwrites a commit's image.
+TAG := $(shell git rev-parse --short HEAD)$(shell git diff --quiet HEAD || date +-dirty-%m%d%H%M)
+IMAGE = $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/earmark/web:$(TAG)
 TESTNET_APP ?= https://earmark-878141445235.us-central1.run.app
 MAINNET_APP ?= https://earmark-mainnet-878141445235.us-central1.run.app
 # Features 4 + 8 (docs/05): Firestore keeps alert links and relay counts; secrets come from
@@ -62,7 +65,7 @@ comma := ,
 
 deploy:
 	gcloud builds submit --project=$(GCP_PROJECT) --config apps/web/cloudbuild.yaml \
-		--substitutions=_TAG=$(shell git rev-parse --short HEAD),_REGION=$(GCP_REGION)
+		--substitutions=_TAG=$(TAG),_REGION=$(GCP_REGION)
 	gcloud run deploy earmark --project=$(GCP_PROJECT) --region=$(GCP_REGION) --image=$(IMAGE) \
 		--service-account=earmark-web@$(GCP_PROJECT).iam.gserviceaccount.com --allow-unauthenticated \
 		--port=8080 --cpu=1 --memory=512Mi --concurrency=40 --min-instances=0 --max-instances=1 \
@@ -73,7 +76,7 @@ deploy:
 MAINNET_CONTRACT ?= budgets.omkar5.near
 MAINNET_DAO ?= earmark.sputnik-dao.near
 MAINNET_CODE_HASH ?= G3SbqW6vShPVvYzdCHCRiLwTZqx8gd9YozuCtW7uZXtX
-MAINNET_TAG = mainnet-$(shell git rev-parse --short HEAD)
+MAINNET_TAG = mainnet-$(TAG)
 deploy-mainnet:
 	@test -n "$(MAINNET_DAO)" || (echo "Set MAINNET_DAO=<treasury>.sputnik-dao.near" && exit 1)
 	gcloud builds submit --project=$(GCP_PROJECT) --config apps/web/cloudbuild.yaml \
@@ -114,6 +117,9 @@ relayer-account:
 	$(TSX) scripts/testnet/relay.ts account
 relay-smoke:
 	$(TSX) scripts/testnet/relay.ts smoke $(or $(APP),$(TESTNET_APP))
+# One payment over maya's limit, left waiting for approval: checks a Telegram alert by hand.
+relay-ask:
+	$(TSX) scripts/testnet/relay.ts ask $(or $(APP),$(TESTNET_APP))
 
 # Tops up the "Try it" sandbox (budget, storage NEAR, signer gas).
 try-refill:

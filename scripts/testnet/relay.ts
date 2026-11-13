@@ -144,7 +144,24 @@ if (cmd === "account") {
   console.log(`request ${id}: ${req.status}, decided by ${req.decided_by}`);
   console.log(`${approver} free NEAR after: ${await freeNear(approver)}`);
   if (req.decided_by !== approver) process.exit(1);
+} else if (cmd === "accept" && arg && process.argv[4]) {
+  // maya accepts a task's work through the relay: `accept <app-url> <task-id>`.
+  await signAndRelay(arg.replace(/\/$/, ""), "maya.earmark.testnet", "accept_task", {
+    task_id: process.argv[4],
+  });
+} else if (cmd === "ask" && arg) {
+  // One payment over maya's limit, left waiting: for checking the Telegram alert by hand.
+  const id = `ask-${randomUUID().slice(0, 12)}`;
+  await signAndRelay(arg.replace(/\/$/, ""), "maya.earmark.testnet", "request_spend", {
+    envelope_id: "0",
+    request_id: id,
+    payee: "bob.earmark.testnet",
+    amount: "10500000",
+    memo: "Logo update",
+    work_ref: `https://earmark.example/work/${id}`,
+  });
+  console.log(`waiting for approval: ${id}`);
 } else {
-  console.log("usage: relay.ts account | carol | zero <account> | smoke <app-url>");
+  console.log("usage: relay.ts account | carol | zero <account> | smoke <app-url> | ask <app-url>");
   process.exit(2);
 }
