@@ -167,7 +167,13 @@ export async function view<T>(contract: string, method: string, args: object = {
   return (await viewRead<T>(contract, method, args)).value;
 }
 
-export type AccountView = { amount: string; code_hash: string; storage_usage: number };
+export type AccountView = {
+  amount: string;
+  code_hash: string;
+  /** Set when the account runs a global contract (newer Sputnik DAOs do). */
+  global_contract_hash?: string;
+  storage_usage: number;
+};
 export const viewAccount = (account: string) =>
   rpcQuery<AccountView>({ request_type: "view_account", finality: "final", account_id: account });
 

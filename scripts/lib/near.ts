@@ -86,7 +86,13 @@ export async function accountExists(network: Network, accountId: string): Promis
   }
 }
 
-export type AccountInfo = { amount: string; code_hash: string; storage_usage: number };
+export type AccountInfo = {
+  amount: string;
+  code_hash: string;
+  /** Set when the account runs a global contract (newer Sputnik DAOs do). */
+  global_contract_hash?: string;
+  storage_usage: number;
+};
 
 export async function viewAccount(network: Network, accountId: string): Promise<AccountInfo> {
   return rpc<AccountInfo>(network, "query", {
@@ -110,7 +116,11 @@ export async function accessKeys(network: Network, accountId: string): Promise<A
 export type TxStatus = {
   status: { SuccessValue?: string; Failure?: unknown };
   receipts_outcome: {
-    outcome: { status: { SuccessValue?: string; Failure?: unknown }; executor_id: string };
+    outcome: {
+      status: { SuccessValue?: string; Failure?: unknown };
+      executor_id: string;
+      logs: string[];
+    };
   }[];
 };
 
