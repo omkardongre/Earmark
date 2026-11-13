@@ -46,7 +46,7 @@ Mainnet (9 Nov, native USDC, tiny amounts): app https://earmark-mainnet-87814144
 
 ## Optional
 
-- [Threat model and limits](https://github.com/omkardongre/Earmark/blob/main/README.md#threat-model-and-limits): escrow trade-off, collusion not solved, public payouts, no audit, 1-of-1 demo treasury on mainnet, DAO factory auto-update on until a vote turns it off
+- [Threat model and limits](https://github.com/omkardongre/Earmark/blob/main/README.md#threat-model-and-limits): escrow trade-off, collusion not solved, public payouts, no audit, 1-of-1 demo treasury on mainnet, DAO factory auto-update turned off by DAO vote #6
 - [Invariants table](https://github.com/omkardongre/Earmark/blob/main/README.md#invariants): one test per invariant, plus what is not yet tested
 - [Web app source](https://github.com/omkardongre/Earmark/tree/main/apps/web/src): Next.js 16
 - [CI workflow](https://github.com/omkardongre/Earmark/blob/main/.github/workflows/ci.yml): fmt, clippy, unit tests, biome, typecheck, web tests, Trezu forms, judge-guide labels
