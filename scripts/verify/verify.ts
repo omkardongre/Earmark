@@ -1,10 +1,25 @@
-// `make verify`: checks the live testnet deployment with no keys and no .env. Every check is a
-// public RPC read; it prints pass/fail per check and exits non-zero if any fails. A network error
-// prints a FAIL line for that check and the run goes on.
-import { readFileSync } from "node:fs";
+// `make verify` (testnet) and `make verify NET=mainnet`: checks the live deployment with no keys
+// and no .env. Every check is a public RPC read. Each line is PASS, FAIL or WARN (true but worth
+// knowing, e.g. one person can pass votes alone; not a failure). The exit code is the number of
+// failed checks. A network error prints a FAIL line for that check and the run goes on.
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { accessKeys, EXPLORER, panicMessage, txStatus, view, viewAccount } from "../lib/near.ts";
+import {
+  type FactoryInfo,
+  moneyRules,
+  type Policy,
+  ruleText,
+} from "../../apps/web/src/lib/governance.ts";
+import {
+  accessKeys,
+  EXPLORER,
+  type Network,
+  panicMessage,
+  txStatus,
+  view,
+  viewAccount,
+} from "../lib/near.ts";
 
 type Step = {
   step: string;
@@ -14,9 +29,11 @@ type Step = {
   signer?: string;
   ok: boolean;
   error?: string;
+  /** Contract events (NEP-297, standard "earmark") the transaction must have logged. */
+  events?: string[];
 };
 type Fixture = {
-  network: "testnet";
+  network: Network;
   contract: string;
   dao: string;
   token: string;
@@ -44,15 +61,31 @@ type Request = {
 };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const fx = JSON.parse(readFileSync(resolve(root, "fixtures/testnet-demo.json"), "utf8")) as Fixture;
-const net = fx.network;
+const arg = process.argv.indexOf("--network");
+const net = (arg > 0 ? process.argv[arg + 1] : process.env.NET || "testnet") as Network;
+if (net !== "testnet" && net !== "mainnet") {
+  console.error("usage: verify.ts [--network testnet|mainnet]");
+  process.exit(2);
+}
+const FIXTURE: Record<Network, string> = {
+  testnet: "fixtures/testnet-demo.json",
+  mainnet: "fixtures/mainnet.json",
+};
+const fx = JSON.parse(readFileSync(resolve(root, FIXTURE[net]), "utf8")) as Fixture;
 /** NEAR the contract keeps free for storage (R19); below it new requests are refused. */
 const STORAGE_RESERVE = 5n * 10n ** 23n;
 let failed = 0;
+let warned = 0;
 
 function check(name: string, pass: boolean, detail = "") {
   if (!pass) failed++;
   console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`);
+}
+/** True but worth knowing (a design choice of the DAO, not a broken promise). Not a failure. */
+function note(name: string, pass: boolean, detail: string) {
+  if (pass) return check(name, true, detail);
+  warned++;
+  console.log(`WARN  ${name}  (${detail})`);
 }
 
 /** Runs one group of checks; an error becomes a FAIL line instead of a stack trace. */
@@ -64,7 +97,10 @@ async function guard(name: string, run: () => Promise<void>) {
   }
 }
 
-const usdc = (v: string | bigint) => `${Number(v) / 1e6}`;
+const meta = await view<{ symbol: string; decimals: number }>(net, fx.token, "ft_metadata").catch(
+  () => ({ symbol: "tokens", decimals: 6 }),
+);
+const usdc = (v: string | bigint) => `${Number(v) / 10 ** meta.decimals}`;
 const near = (v: bigint) => `${Number(v / 10n ** 20n) / 1e4} NEAR`;
 
 console.log(`Earmark on ${net}: contract ${fx.contract}, DAO ${fx.dao}\n`);
@@ -109,6 +145,49 @@ await guard("contract config readable", async () => {
   );
 });
 
+// 2b. Who controls the DAO that owns Earmark: its code, and how many members a vote needs.
+await guard("DAO readable", async () => {
+  const [account, factory, policy] = await Promise.all([
+    viewAccount(net, fx.dao),
+    view<FactoryInfo>(net, fx.dao, "get_factory_info"),
+    view<Policy>(net, fx.dao, "get_policy"),
+  ]);
+  const code = account.global_contract_hash ?? account.code_hash;
+  const published = await view<[string, unknown][]>(
+    net,
+    factory.factory_id,
+    "get_contracts_metadata",
+  ).catch(() => [] as [string, unknown][]);
+  check(
+    "DAO runs Sputnik code its factory published",
+    published.some(([h]) => h === code),
+    `${code.slice(0, 8)}… from ${factory.factory_id}`,
+  );
+  note(
+    "factory can't replace the DAO's code without a vote",
+    !factory.auto_update,
+    factory.auto_update
+      ? `auto_update is on: ${factory.factory_id}'s key holders can install new DAO code. Fix: one FactoryInfoUpdate vote with auto_update false`
+      : "auto_update is off",
+  );
+  const r = moneyRules(policy);
+  for (const [what, rule] of [
+    ["a payout", r.payouts],
+    ["a budget change", r.calls],
+    ["new Earmark code", r.code],
+  ] as const) {
+    if (!rule) {
+      check(`DAO can approve ${what}`, false, "no named role can vote on it");
+      continue;
+    }
+    note(
+      `${what} needs more than one DAO member`,
+      rule.needed > 1,
+      `${ruleText(rule)} in ${rule.role}${rule.needed === 1 ? `: ${rule.members.join(", ")} can pass it alone` : ""}`,
+    );
+  }
+});
+
 // 3. Budget numbers add up (R4), and 4. request history: totals and DAO proposals.
 await guard("budget readable", async () => {
   const env = await view<Envelope>(net, fx.contract, "get_envelope", {
@@ -131,7 +210,7 @@ await guard("budget readable", async () => {
   check(
     "contract holds at least the budget balance",
     BigInt(tokenBalance) >= (bal ?? 0n),
-    `${usdc(tokenBalance)} tUSDC held`,
+    `${usdc(tokenBalance)} ${meta.symbol} held`,
   );
 
   const requests: [string, Request][] = [];
@@ -193,10 +272,42 @@ for (const s of fx.steps) {
     const failure =
       t.receipts_outcome.map((r) => r.outcome.status.Failure).find(Boolean) ?? t.status.Failure;
     const ok = !failure;
-    const pass = ok === s.ok && (ok || panicMessage(failure) === s.error);
+    const logged = new Set(
+      t.receipts_outcome
+        .flatMap((r) => r.outcome.logs)
+        .filter((l) => l.startsWith("EVENT_JSON:"))
+        .map((l) => JSON.parse(l.slice(11)) as { standard: string; event: string })
+        .filter((e) => e.standard === "earmark")
+        .map((e) => e.event),
+    );
+    const events = (s.events ?? []).every((e) => logged.has(e));
+    const pass = ok === s.ok && (ok || panicMessage(failure) === s.error) && events;
     check(`${s.label} -> ${s.expect}`, pass, `${EXPLORER[net]}/txns/${tx}`);
   });
 }
 
-console.log(`\n${failed === 0 ? "All checks passed." : `${failed} check(s) failed.`}`);
-process.exit(failed === 0 ? 0 : 1);
+// 6. Attacks the contract (or NEAR) refused, recorded by `make attacks`: each must still read as
+// refused for the recorded reason. Anyone can open the tx links.
+const attacksFile = resolve(root, `fixtures/${net}-attacks.json`);
+if (existsSync(attacksFile)) {
+  const { attacks } = JSON.parse(readFileSync(attacksFile, "utf8")) as {
+    attacks: { label: string; expect: string; tx: string; signer: string }[];
+  };
+  console.log("");
+  let refused = 0;
+  for (const a of attacks) {
+    await guard(`refused: ${a.label}`, async () => {
+      const t = await txStatus(net, a.tx, a.signer);
+      const failure =
+        t.receipts_outcome.map((r) => r.outcome.status.Failure).find(Boolean) ?? t.status.Failure;
+      const pass = Boolean(failure) && JSON.stringify(failure).includes(a.expect);
+      if (pass) refused++;
+      check(`refused: ${a.label} (${a.expect})`, pass, `${EXPLORER[net]}/txns/${a.tx}`);
+    });
+  }
+  console.log(`      ${refused} of ${attacks.length} attacks refused on chain`);
+}
+
+const warnings = warned ? ` ${warned} warning(s): true facts, not failures.` : "";
+console.log(`\n${failed === 0 ? "All checks passed." : `${failed} check(s) failed.`}${warnings}`);
+process.exit(Math.min(failed, 100));

@@ -1,0 +1,40 @@
+name: Live checks
+# Re-reads the live deployments every 6 hours with no keys: `make verify` on testnet and mainnet.
+# A FAIL line fails the run (and the badge); WARN lines are true facts worth knowing, not failures.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - fixtures/**
+      - scripts/verify/**
+      - scripts/lib/near.ts
+      - apps/web/src/lib/governance.ts
+      - .github/workflows/live.yml
+permissions:
+  contents: read
+concurrency:
+  group: live-checks
+  cancel-in-progress: false
+jobs:
+  verify:
+    name: verify ${{ matrix.network }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        network: [testnet, mainnet]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @earmark/scripts
+      - run: make verify NET=${{ matrix.network }}

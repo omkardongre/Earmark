@@ -1,0 +1,132 @@
+{
+  "network": "mainnet",
+  "contract": "budgets.omkar5.near",
+  "dao": "earmark.sputnik-dao.near",
+  "token": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+  "envelope_id": "0",
+  "code_hash": "G3SbqW6vShPVvYzdCHCRiLwTZqx8gd9YozuCtW7uZXtX",
+  "steps": [
+    {
+      "step": "deploy",
+      "label": "Contract deployed with its own key",
+      "expect": "ok",
+      "tx": "9MXqz7ArmDyn9xyQhZ5AcJD3djEXXGARWtixJRxYckEu",
+      "signer": "budgets.omkar5.near",
+      "ok": true
+    },
+    {
+      "step": "keys",
+      "label": "That key deleted: the contract has no keys",
+      "expect": "ok",
+      "tx": "6sTMDfM9fxTSLMHTuDpibqQDogHtzjQipNw6kqjwowiS",
+      "signer": "budgets.omkar5.near",
+      "ok": true
+    },
+    {
+      "step": "create",
+      "label": "Trezu vote #1 creates budget \"Contributors\"",
+      "expect": "envelope_created",
+      "tx": "6vt1K6BQoAr9GAbhxPX876JkVKeG94UbjUfdjc3zb6Aa",
+      "signer": "sponsor.trezu.near",
+      "ok": true,
+      "events": ["envelope_created"]
+    },
+    {
+      "step": "fund",
+      "label": "Trezu vote #2 funds it with 1 USDC",
+      "expect": "envelope_funded",
+      "tx": "B5CBZbtw46k9VXtE9Ez5ChCkEULh4qsC7ACtWCDGn4hB",
+      "signer": "sponsor.trezu.near",
+      "ok": true,
+      "events": ["envelope_funded"]
+    },
+    {
+      "step": "auto",
+      "label": "Lead pays 0.1 USDC to writer at once",
+      "expect": "spend_paid",
+      "tx": "GrGnaEtUfwYx3GNQF33zJENiTZszw1X9b5TtKgPwFZzE",
+      "signer": "lead.omkar5.near",
+      "ok": true,
+      "events": ["spend_requested", "spend_paid"]
+    },
+    {
+      "step": "ask",
+      "label": "Lead asks 0.4 USDC for designer (over the lead's limit)",
+      "expect": "spend_requested",
+      "tx": "CLU3oFeiAQB9sNYrtfjLJRAaaMaqBCGNQRMwEtJPidfX",
+      "signer": "lead.omkar5.near",
+      "ok": true,
+      "events": ["spend_requested"]
+    },
+    {
+      "step": "approve",
+      "label": "Council member approves: designer paid",
+      "expect": "spend_paid",
+      "tx": "664iRXnxcAwnzdcrDFjtLtD9b39nysWCCp9Sw5y1ok3y",
+      "signer": "omkar5.near",
+      "ok": true,
+      "events": ["spend_approved", "spend_paid"]
+    },
+    {
+      "step": "escalate",
+      "label": "Lead asks 0.6 USDC (over the one-approval limit): DAO vote #3",
+      "expect": "spend_escalated",
+      "tx": "3L7fDFfip6LYL4XKZKMSHFfATAeGqE9C1nYykjdkC3NG",
+      "signer": "lead.omkar5.near",
+      "ok": true,
+      "events": ["spend_escalated"]
+    },
+    {
+      "step": "dao-vote",
+      "label": "Trezu vote #3 approved: the DAO pays writer",
+      "expect": "ok",
+      "tx": "5hnmfLjyt4ouFhNqyM6A9wDD5ty5qXJDdMq1kH7xHvBm",
+      "signer": "sponsor.trezu.near",
+      "ok": true
+    },
+    {
+      "step": "settle",
+      "label": "Earmark records vote #3 as paid by the DAO",
+      "expect": "escalation_settled",
+      "tx": "H6c6w4LM6nADVWaGvd8jYub6Hvw98oWVjGaeRznizGxf",
+      "signer": "lead.omkar5.near",
+      "ok": true,
+      "events": ["escalation_settled"]
+    },
+    {
+      "step": "upgrade",
+      "label": "Trezu vote #4 installs new code (the only way code changes)",
+      "expect": "ok",
+      "tx": "DQdeatJg2BtRyptFWsU68su3QrtE72TvN1dVVGiBFvt1",
+      "signer": "omkar5.near",
+      "ok": true
+    },
+    {
+      "step": "escalate-2",
+      "label": "Lead asks 0.6 USDC for designer: DAO vote #5",
+      "expect": "spend_escalated",
+      "tx": "J3nLTLpCCnxwE9JJvp28gouBN6qKpw5jJLAvmkmNZdhq",
+      "signer": "lead.omkar5.near",
+      "ok": true,
+      "events": ["spend_escalated"]
+    },
+    {
+      "step": "dao-pays-through-earmark",
+      "label": "Trezu vote #5 approved: Earmark pays designer inside the vote",
+      "expect": "spend_paid",
+      "tx": "6BDge6HdGFME3QDSA2Yh9hvT1UEvAX54wyG8YfAgyEUb",
+      "signer": "sponsor.trezu.near",
+      "ok": true,
+      "events": ["escalation_settled", "spend_paid"]
+    },
+    {
+      "step": "request-link",
+      "label": "Writer's \"ask to be paid\" link: the lead pays 0.1 USDC",
+      "expect": "spend_paid",
+      "tx": "AcKEqpTZyECtUUNs53o1j4UnTut6Cz52q62evzjBaTvT",
+      "signer": "lead.omkar5.near",
+      "ok": true,
+      "events": ["spend_requested", "spend_paid"]
+    }
+  ]
+}
