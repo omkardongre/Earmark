@@ -11,6 +11,8 @@ import { approverQueue } from "@/lib/data";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  // Absolute links for share previews (og:image); APP_URL is set on the hosted app.
+  metadataBase: new URL(process.env.APP_URL || "http://localhost:3000"),
   title: "Earmark · Team budgets for DAOs",
   description:
     "Give each team a budget. Small payments go out at once, bigger ones need one approval, the rest go to a DAO vote.",

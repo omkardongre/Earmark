@@ -46,14 +46,27 @@ export async function Landing({
             <ButtonLink href={TRY_URL}>
               {NETWORK === "mainnet" ? "Try it on testnet, no wallet" : "Try it, no wallet"}
             </ButtonLink>
-            <ButtonLink href="/preview" variant="secondary">
-              Replay a real DAO’s history
-            </ButtonLink>
           </div>
         </div>
         {demo && <RoutePicker {...demo} />}
       </div>
 
+      {/* NEARWEEK's history is closed (last proposal Jun 2024), so these counts can't change;
+          /preview recomputes them live from the DAO with the same two limits. */}
+      <Link
+        href="/preview"
+        className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-2xl bg-white p-5 ring-1 ring-line hover:ring-brand"
+      >
+        <span className="space-y-1">
+          <span className="tabular block text-2xl font-bold tracking-tight">13,896 votes → 20</span>
+          <span className="block max-w-2xl text-muted">
+            NEARWEEK’s council voted on each of its 13,896 small payouts (2022–2024). With a 1 NEAR
+            limit and one approval up to 5 NEAR, only 20 needed a vote, and 121 repeat claims were
+            blocked.
+          </span>
+        </span>
+        <span className="font-medium text-brand">Replay it yourself →</span>
+      </Link>
       <div className="grid gap-3 sm:grid-cols-3">
         {TILES.map((t) => {
           const paid = requests.filter(([, r]) => r.tier === t.tier && PAID.has(r.status));

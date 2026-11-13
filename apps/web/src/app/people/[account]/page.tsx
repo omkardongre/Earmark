@@ -1,6 +1,8 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActivityList } from "@/components/activity-list";
+import { ShareButton } from "@/components/share-button";
 import { Avatar, Card, Disclosure, ExternalLink, Pill, Section } from "@/components/ui";
 import { accountUrl } from "@/lib/config";
 import { loadActivity, loadBase } from "@/lib/data";
@@ -8,6 +10,20 @@ import { ago, duration, money, shortName } from "@/lib/format";
 import { getPayeeRecord, getRecord, getTrust, isEligible } from "@/lib/near";
 
 export const dynamic = "force-dynamic";
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ account: string }>;
+}): Promise<Metadata> {
+  const name = shortName(decodeURIComponent((await params).account));
+  const description = `${name}'s paid work and record on Earmark. Every payment links its NEAR transaction.`;
+  return {
+    title: `${name} · Earmark`,
+    description,
+    openGraph: { title: `${name} · Earmark`, description },
+    twitter: { card: "summary_large_image" },
+  };
+}
 
 export default async function PersonPage({ params }: { params: Promise<{ account: string }> }) {
   const account = decodeURIComponent((await params).account);
@@ -43,10 +59,10 @@ export default async function PersonPage({ params }: { params: Promise<{ account
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <Avatar id={account} size="lg" />
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{name}</h1>
+        <div className="min-w-0 flex-1">
+          <h1 className="break-words text-3xl font-bold tracking-tight">{name}</h1>
           <p className="text-muted">
             {roles
               .flatMap((x) => x.r)
@@ -54,6 +70,15 @@ export default async function PersonPage({ params }: { params: Promise<{ account
               .join(" · ") || "Not part of a budget"}
           </p>
         </div>
+        {(paid.paid_count > 0 || record.paid_count > 0) && (
+          // Its own row on a phone, so a long name never runs under it.
+          <div className="max-sm:basis-full">
+            <ShareButton
+              title={`${name} · Earmark`}
+              text={`${name}'s paid work on Earmark, each payment with its NEAR transaction.`}
+            />
+          </div>
+        )}
       </div>
 
       {isSpender && (
@@ -158,7 +183,7 @@ export default async function PersonPage({ params }: { params: Promise<{ account
 function Num({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="tabular text-2xl font-bold tracking-tight">{value}</p>
+      <p className="tabular text-xl font-bold tracking-tight sm:text-2xl">{value}</p>
       <p className="text-sm text-muted">{label}</p>
     </div>
   );

@@ -674,35 +674,41 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                           )}
                         </span>
                         <span className="flex items-center gap-2">
-                          {s.id !== accountId && s.eligible && !paused && (
-                            <RaiseButton
-                              name={name}
-                              limit={s.limit}
-                              ceiling={b.ceiling}
-                              delay={later}
-                              symbol={b.symbol}
-                              decimals={b.decimals}
-                              busy={busy === `r${sKey}`}
-                              onRaise={async (amount) => {
-                                const r = await run(`r${sKey}`, "raise_limit", {
-                                  envelope_id: b.id,
-                                  spender: s.id,
-                                  new_limit: amount,
-                                });
-                                if (!r) return false;
-                                queued(b, r.value, {
-                                  spender_auto_limit: { spender: s.id, amount },
-                                });
-                                toast({
-                                  ok: true,
-                                  text: `${name}’s new limit applies in ${later}. Any approver can cancel.`,
-                                  tx: r.hash,
-                                  fee: !!r.sponsored,
-                                });
-                                return true;
-                              }}
-                            />
-                          )}
+                          {s.id !== accountId &&
+                            s.eligible &&
+                            !paused &&
+                            // One raise at a time: a waiting one shows above with its Cancel.
+                            !changesOf(b).some(
+                              (c) => c.kind === "spender_auto_limit" && c.spender === s.id,
+                            ) && (
+                              <RaiseButton
+                                name={name}
+                                limit={s.limit}
+                                ceiling={b.ceiling}
+                                delay={later}
+                                symbol={b.symbol}
+                                decimals={b.decimals}
+                                busy={busy === `r${sKey}`}
+                                onRaise={async (amount) => {
+                                  const r = await run(`r${sKey}`, "raise_limit", {
+                                    envelope_id: b.id,
+                                    spender: s.id,
+                                    new_limit: amount,
+                                  });
+                                  if (!r) return false;
+                                  queued(b, r.value, {
+                                    spender_auto_limit: { spender: s.id, amount },
+                                  });
+                                  toast({
+                                    ok: true,
+                                    text: `${name}’s new limit applies in ${later}. Any approver can cancel.`,
+                                    tx: r.hash,
+                                    fee: !!r.sponsored,
+                                  });
+                                  return true;
+                                }}
+                              />
+                            )}
                           {paused ? (
                             unpause !== null ? (
                               <span className="tabular text-sm text-muted">
