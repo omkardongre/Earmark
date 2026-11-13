@@ -74,21 +74,37 @@ export function BudgetCard({
             style={{ width: `${leftPct}%` }}
           />
         </div>
-        <p className="tabular text-muted">
-          {waiting > 0n && (
-            <>
-              <AnimatedNumber value={waiting.toString()} meta={m} /> {m.symbol} set aside ·{" "}
-            </>
-          )}
-          <AnimatedNumber value={b.spent_total} meta={m} /> {m.symbol} paid out
-        </p>
-        {period && (
-          <ForRoles team={team} roles={["lead", "approver", "visitor"]}>
-            <p className="tabular text-muted">
-              <AnimatedNumber value={b.period_spent} meta={m} /> of {money(b.period_cap, m)} used
-              this period ({period})
-            </p>
-          </ForRoles>
+        {/* Budget page, for the team: this period's use against the cap is what decides the next
+            payment, so it replaces the all-time "paid out" line. */}
+        {period ? (
+          <>
+            <ForRoles team={team} roles={["lead", "approver", "visitor"]}>
+              <p className="tabular text-muted">
+                <AnimatedNumber value={b.period_spent} meta={m} /> of {money(b.period_cap, m)} used
+                · resets every {period}
+                {waiting > 0n && (
+                  <>
+                    <br />
+                    <AnimatedNumber value={waiting.toString()} meta={m} /> {m.symbol} set aside
+                  </>
+                )}
+              </p>
+            </ForRoles>
+            <ForRoles team={team} roles={["contributor"]}>
+              <p className="tabular text-muted">
+                <AnimatedNumber value={b.spent_total} meta={m} /> {m.symbol} paid out
+              </p>
+            </ForRoles>
+          </>
+        ) : (
+          <p className="tabular text-muted">
+            {waiting > 0n && (
+              <>
+                <AnimatedNumber value={waiting.toString()} meta={m} /> {m.symbol} set aside ·{" "}
+              </>
+            )}
+            <AnimatedNumber value={b.spent_total} meta={m} /> {m.symbol} paid out
+          </p>
         )}
       </div>
       <Earned team={team} earned={earned} meta={m} />

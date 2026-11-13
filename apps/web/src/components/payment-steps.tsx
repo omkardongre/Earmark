@@ -5,7 +5,6 @@ import { txUrl } from "@/lib/config";
 import { ago, payoutReason, shortName } from "@/lib/format";
 import type { EarmarkEvent } from "@/lib/near";
 import { LocalTime } from "./local-time";
-import { ExternalLink } from "./ui";
 
 /** Tries while the history indexer catches up with a payment made seconds ago (about 15 s). */
 const TRIES = 5;
@@ -63,10 +62,20 @@ export function PaymentSteps({
                   <span className="print:hidden">{ago(e.timestampNs)}</span>
                   <span className="hidden print:inline">
                     <LocalTime ns={e.timestampNs} />
-                  </span>{" "}
-                  · <ExternalLink href={txUrl(e.tx)}>Transaction</ExternalLink>
+                  </span>
                 </p>
               </div>
+              {/* The proof stays one tap away, without a "Transaction" label on every row. */}
+              <a
+                href={txUrl(e.tx)}
+                target="_blank"
+                rel="noreferrer"
+                title="View on the explorer"
+                aria-label="View this step on the explorer"
+                className="shrink-0 self-start rounded-lg px-2 py-1 text-muted hover:bg-slate-100 hover:text-ink print:hidden"
+              >
+                ↗
+              </a>
             </li>
           );
         })}

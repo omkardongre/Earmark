@@ -17,18 +17,18 @@ import type { SpendRequest } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-/** How the rules handled it, in words a lead uses. */
+/** Which approval the rules needed, in a few words. */
 function ruleText(r: SpendRequest, oneLimit: string): string {
   const who = shortName(r.spender);
   switch (r.tier) {
     case "auto":
-      return `Paid at once: within ${who}’s own limit`;
+      return `None: within ${who}’s limit`;
     case "one_approver":
-      return `One approval: above ${who}’s limit, up to ${oneLimit}`;
+      return `1 approver: over ${who}’s limit`;
     case "escalate":
-      return `DAO vote: over ${oneLimit} needs the DAO`;
+      return `DAO vote: over ${oneLimit}`;
     case "trusted":
-      return `Paid at once: ${shortName(r.payee)} is a trusted contributor of this budget`;
+      return `None: ${shortName(r.payee)} is trusted here`;
   }
 }
 
@@ -64,6 +64,8 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
       : false;
   // The receipt names the payout itself: the transaction that moved the money.
   const payout = events?.findLast((e) => e.event === "spend_paid");
+  // Earmark's relayer paid the fee for at least one step (feature 8).
+  const sponsored = !!events?.some((e) => e.sponsored);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -121,7 +123,16 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
           <dt className="text-muted">Work</dt>
           <dd className="min-w-0 break-words">
             {link ? (
-              <ExternalLink href={link}>{r.work_ref.replace(/^https?:\/\//, "")}</ExternalLink>
+              <a
+                href={link}
+                target="_blank"
+                rel="noreferrer"
+                title={link}
+                className="font-medium text-brand hover:underline"
+              >
+                <span className="print:hidden">View work ↗</span>
+                <span className="hidden break-all print:inline">{link}</span>
+              </a>
             ) : (
               r.work_ref
             )}
@@ -132,7 +143,7 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
               <dd>{r.memo}</dd>
             </>
           )}
-          <dt className="text-muted">Rule</dt>
+          <dt className="text-muted">Approval</dt>
           <dd>{ruleText(r, money(b.one_approver_limit, m))}</dd>
           {r.decided_by && (
             <>
@@ -142,6 +153,12 @@ export default async function PaymentPage({ params }: { params: Promise<{ id: st
               <dd>
                 <Person id={r.decided_by} />
               </dd>
+            </>
+          )}
+          {sponsored && (
+            <>
+              <dt className="text-muted">Network fee</dt>
+              <dd>Paid by Earmark</dd>
             </>
           )}
           {r.dao_proposal_id !== null && (
