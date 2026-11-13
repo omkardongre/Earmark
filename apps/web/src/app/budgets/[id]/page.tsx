@@ -126,10 +126,11 @@ export default async function BudgetPage({
               </Group>
             </div>
           </Disclosure>
+          {/* Only the people who act on alerts: leads review work, approvers approve. */}
           {alertsOn() && !b.closed && (
-            <Disclosure title="Telegram alerts">
+            <ForRoles team={team} roles={["lead", "approver"]}>
               <TelegramAlerts budgetId={id} />
-            </Disclosure>
+            </ForRoles>
           )}
         </div>
 

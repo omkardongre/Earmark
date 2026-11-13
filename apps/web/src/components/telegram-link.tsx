@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Button, TextButton } from "./ui";
+import { useEffect, useState } from "react";
+import { Button, Card, Pill, TextButton } from "./ui";
 import { useWallet } from "./wallet";
 
 type Target =
@@ -41,37 +41,57 @@ function useOpen() {
   return { open, busy, error };
 }
 
-/** Budget page: alerts for the team chat, and "Mention me" for the signed-in person. */
+/**
+ * Budget page, for leads and approvers: one reason to connect, one main action, and whether a
+ * team chat is already connected. "Just me" links the signed-in account for DMs and mentions.
+ */
 export function TelegramAlerts({ budgetId }: { budgetId: string }) {
   const { accountId } = useWallet();
   const { open, busy, error } = useOpen();
+  const [chats, setChats] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/alerts/status?budgetId=${encodeURIComponent(budgetId)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { chats?: number } | null) => live && setChats(b?.chats ?? 0))
+      .catch(() => live && setChats(0));
+    return () => {
+      live = false;
+    };
+  }, [budgetId]);
+  const on = (chats ?? 0) > 0;
   return (
-    <div className="space-y-3 px-5 py-4">
+    <Card className="space-y-3 p-5">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-semibold">Telegram alerts</h2>
+        {on && <Pill tone="green">On</Pill>}
+      </div>
       <p className="text-muted">
-        Work to review, payments that need an approver, rule changes and “Paid”, in your team chat.
+        {on
+          ? `Posting to ${chats === 1 ? "your team chat" : `${chats} team chats`}. Send /stop there to turn it off.`
+          : "Get pinged when a payment needs approval."}
       </p>
-      <Button
-        variant="secondary"
-        className="w-full"
-        busy={busy}
-        onClick={() => open({ kind: "group", budgetId })}
-      >
-        Add to a team chat
-      </Button>
-      {accountId && (
-        <TextButton disabled={busy} onClick={() => open({ kind: "me", account: accountId })}>
-          Mention me and message me what needs me
-        </TextButton>
-      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Button
+          variant="secondary"
+          className={on ? "" : "w-full"}
+          busy={busy}
+          onClick={() => open({ kind: "group", budgetId })}
+        >
+          {on ? "Add another chat" : "Connect team chat"}
+        </Button>
+        {accountId && (
+          <TextButton disabled={busy} onClick={() => open({ kind: "me", account: accountId })}>
+            Just me instead
+          </TextButton>
+        )}
+      </div>
       {error && (
         <p className="text-sm text-rose-700" role="alert">
           {error}
         </p>
       )}
-      <p className="text-sm text-muted">
-        The bot can’t approve or move money. Buttons open Earmark.
-      </p>
-    </div>
+    </Card>
   );
 }
 
@@ -81,7 +101,7 @@ export function TelegramWatch(props: { requestId: string } | { taskId: string })
   return (
     <span className="inline-flex flex-col gap-1">
       <TextButton disabled={busy} onClick={() => open({ kind: "watch", ...props } as Target)}>
-        {"requestId" in props ? "Tell me in Telegram when it’s paid" : "Tell me in Telegram"}
+        {"requestId" in props ? "Tell me on Telegram when it’s paid" : "Follow on Telegram"}
       </TextButton>
       {error && (
         <span className="text-sm text-rose-700" role="alert">
