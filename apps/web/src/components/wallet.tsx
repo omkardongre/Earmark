@@ -17,7 +17,10 @@ import { errorMessage } from "@/lib/format";
 import { Button } from "./ui";
 
 type CallOptions = { gasTgas?: number; deposit?: string; receiverId?: string };
-type CallResult = { ok: true; hash: string; value: unknown } | { ok: false; error: string };
+/** `sponsored`: Earmark's relayer paid the network fee for this call (feature 8). */
+type CallResult =
+  | { ok: true; hash: string; value: unknown; sponsored?: boolean }
+  | { ok: false; error: string };
 
 type Wallet = {
   accountId: string | null;
@@ -77,7 +80,7 @@ function readOutcome(o: Outcome, relayed = false): CallResult {
       value = atob(raw);
     }
   }
-  return { ok: true, hash: o.transaction.hash, value };
+  return { ok: true, hash: o.transaction.hash, value, sponsored: relayed };
 }
 
 /** Fired after a successful transaction; client lists (activity) reload their first page. */
@@ -309,11 +312,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** "Network fee paid by Earmark" under a main action, when the relayer pays it (feature 8). */
-export function FeeNote({ className = "" }: { className?: string }) {
+/**
+ * "No network fee for you" under a main action, when the relayer pays it (feature 8). While the
+ * wallet asks, it says what to expect: some wallets title the request "Sign Delegate Action".
+ */
+export function FeeNote({
+  className = "",
+  signing = false,
+}: {
+  className?: string;
+  signing?: boolean;
+}) {
   const { sponsored, accountId } = useWallet();
   if (!sponsored || !accountId) return null;
   return (
-    <p className={`text-center text-xs text-muted ${className}`}>Network fee paid by Earmark</p>
+    <p className={`text-center text-sm text-muted ${className}`} aria-live="polite">
+      {signing ? "Sign in your wallet. Earmark pays the network fee." : "No network fee for you"}
+    </p>
   );
 }

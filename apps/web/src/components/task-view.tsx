@@ -130,7 +130,9 @@ export function TaskView({
           team={team}
           meta={meta}
           reload={reload}
-          onDone={(text, href) => toast({ ok: true, text, ...(href ? { href } : {}) })}
+          onDone={(text, href, fee) =>
+            toast({ ok: true, text, fee: !!fee, ...(href ? { href } : {}) })
+          }
         />
       </Card>
       {showWork && task.work_ref && (
@@ -191,6 +193,8 @@ export function TaskView({
             !sentBack &&
             task.status !== "paid" &&
             reason !== "Cancelled" &&
+            // "The last person gave it back" means nothing to someone about to take an open task.
+            !(task.status === "open" && !ownWords) &&
             (ownWords ? reviewer : true) && (
               <Row
                 label={
@@ -238,7 +242,7 @@ function Actions({
   team: Team;
   meta: TokenMeta;
   reload: (before: Task) => Promise<Task | null>;
-  onDone: (text: string, href?: string) => void;
+  onDone: (text: string, href?: string, fee?: boolean) => void;
 }) {
   const { connect, call } = useWallet();
   const { me, role } = useRole(team);
@@ -330,7 +334,7 @@ function Actions({
     if (r.ok) {
       setBusy(null);
       setNotice("Done. Loading the next step…");
-      onDone(ok, href);
+      onDone(ok, href, r.sponsored);
       let fresh = await reload(before);
       // An instant payment settles a moment after "accepted": wait for "paid".
       if (fresh?.status === "accepted") fresh = (await reload(fresh)) ?? fresh;

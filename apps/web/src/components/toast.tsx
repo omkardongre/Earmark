@@ -13,7 +13,8 @@ import {
 import { txUrl } from "@/lib/config";
 
 /** `href` opens a page in the app (the payment); otherwise `tx` opens the transaction. */
-type Toast = { ok: boolean; text: string; tx?: string; href?: string };
+/** `fee`: Earmark paid the network fee (a relayed call), said in a small second line. */
+type Toast = { ok: boolean; text: string; tx?: string; href?: string; fee?: boolean };
 
 const ToastContext = createContext<(t: Toast) => void>(() => {});
 
@@ -60,7 +61,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             }`}
           >
             <span aria-hidden>{toast.ok ? "✓" : "!"}</span>
-            <span>{toast.text}</span>
+            <span>
+              {toast.text}
+              {toast.fee && (
+                <span className="block text-sm text-white/70">Network fee paid by Earmark</span>
+              )}
+            </span>
             {toast.href ? (
               <Link href={toast.href} className={link} onClick={() => setToast(null)}>
                 View

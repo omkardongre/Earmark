@@ -44,7 +44,15 @@ const TIER: Record<
 };
 
 /** `payee` is the short name, with "’s near.com balance" for a near.com payee. */
-type Done = { status: RequestStatus | null; amount: string; payee: string; id: string; tx: string };
+type Done = {
+  status: RequestStatus | null;
+  amount: string;
+  payee: string;
+  id: string;
+  tx: string;
+  /** Earmark paid the network fee. */
+  fee: boolean;
+};
 
 const doneText = (d: Done) =>
   d.status === "paid"
@@ -196,6 +204,7 @@ export function PaySheet({
         payee: `${shortName(payee)}${toNearCom ? "’s near.com balance" : ""}`,
         id,
         tx: r.hash,
+        fee: !!r.sponsored,
       });
     } else {
       // Same request id on retry, so a payment that did go through can't be sent twice.
@@ -246,6 +255,9 @@ export function PaySheet({
                 {done.status === "failed" ? "!" : "✓"}
               </div>
               <p className="text-lg font-semibold">{doneText(done)}</p>
+              {done.fee && (
+                <p className="mt-1 text-sm text-white/80">Network fee paid by Earmark</p>
+              )}
             </div>
             <div className="flex gap-2">
               <ButtonLink
