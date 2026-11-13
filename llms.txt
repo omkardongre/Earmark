@@ -19,7 +19,7 @@ Mainnet (9 Nov, native USDC, tiny amounts): app https://earmark-mainnet-87814144
 - [Replay a DAO's history](https://earmark-878141445235.us-central1.run.app/preview): NEARWEEK's 14,171 mainnet proposals replayed against two limits
 - [Check it yourself](https://earmark-878141445235.us-central1.run.app/verify): keyless live checks of the contract
 - [People](https://earmark-878141445235.us-central1.run.app/people): contributor and lead records from contract views
-- [Tasks](https://earmark-878141445235.us-central1.run.app/budgets/0/tasks): funded tasks (bounties) and trusted contributors; testnet only, mainnet comes in the same upgrade as NEAR Intents payouts
+- [Tasks](https://earmark-878141445235.us-central1.run.app/budgets/0/tasks): funded tasks (bounties) and trusted contributors; on testnet and, since DAO vote #7, on mainnet together with NEAR Intents payouts
 - [Contract source](https://github.com/omkardongre/Earmark/tree/main/contracts/earmark/src): Rust, near-sdk 5.29.1
 - [Unit tests](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/src/tests.rs): `make test`
 - [Sandbox tests](https://github.com/omkardongre/Earmark/blob/main/contracts/earmark/tests/sandbox.rs): `make test-sandbox` (Docker)

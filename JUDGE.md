@@ -16,7 +16,7 @@ Track: Social Money (`social`). Everything below is public and needs no keys.
 
 | Do | You should see |
 |---|---|
-| Open the mainnet app's [`/verify`](https://earmark-mainnet-878141445235.us-central1.run.app/verify) | "Check it yourself": 0 keys on the contract, the code is the published build, code changed only by DAO vote #4, balances add up, and only a DAO vote can change the DAO's code. One amber row says one member can pass votes alone (see "What we don't claim") |
+| Open the mainnet app's [`/verify`](https://earmark-mainnet-878141445235.us-central1.run.app/verify) | "Check it yourself": 0 keys on the contract, the code is the published build, code changed only by DAO votes #4 and #7, balances add up, and only a DAO vote can change the DAO's code. One amber row says one member can pass votes alone (see "What we don't claim") |
 | Open DAO vote [#5 in Trezu](https://trezu.app/earmark.sputnik-dao.near/requests?id=5) | A normal Trezu payment request, "Pay designer.omkar5.near through Earmark", approved there. Earmark filed it because 0.6 USDC was above the budget's one-approval limit, and paid the designer inside that vote |
 | Open the testnet app and press "Try it, no wallet" | Real testnet transactions: a payment that goes out at once, one that needs an approval, and refusals with the contract's reason (unknown payee, same work twice, a race for the last funds, paused, a lead's key trying to approve) |
 | On the testnet home page, open "Replay it yourself →" | NEARWEEK's 14,171 real mainnet proposals replayed: with a 1 NEAR limit and one approval up to 5 NEAR, the council votes on 20 of 13,896 payouts, and 121 repeat claims are blocked |
@@ -41,7 +41,8 @@ The same checks run every 6 hours in CI ([Live checks](.github/workflows/live.ym
 | | Mainnet | Testnet |
 |---|---|---|
 | Budgets, three payment paths, payee list, "ask to be paid" link, receipts | Yes, native USDC | Yes |
-| Tasks (bounties), near.com payouts, Telegram alerts, fees paid by Earmark | Not yet: waits for one DAO-voted upgrade | Yes |
+| Tasks (bounties), near.com payouts | Installed by DAO vote #7; no real near.com payout yet | Yes |
+| Telegram alerts, fees paid by Earmark | Not yet: needs a mainnet sponsor account and bot | Yes |
 | Users | The builder's own accounts | Demo accounts |
 
 ## What we don't claim

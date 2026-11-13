@@ -6,8 +6,8 @@ Earmark gives teams in a Sputnik DAO (including Trezu-made treasuries) their own
 
 - **Track:** Social Money (`social`), NEAR HACKATHON.
 - **For judges:** [`JUDGE.md`](JUDGE.md): a 3-minute walkthrough, one command (`make verify NET=mainnet`) and what we don't claim.
-- **Mainnet:** https://earmark-mainnet-878141445235.us-central1.run.app. Contract `budgets.omkar5.near` (0 keys), owned by the Trezu treasury `earmark.sputnik-dao.near`, native USDC. Budgets, the three payment paths, the "ask to be paid" link and receipts.
-- **Testnet:** https://earmark-878141445235.us-central1.run.app. Everything above plus tasks (bounties), near.com payouts, Telegram alerts and fees paid by Earmark. Mainnet gets these in one DAO-voted upgrade.
+- **Mainnet:** https://earmark-mainnet-878141445235.us-central1.run.app. Contract `budgets.omkar5.near` (0 keys), owned by the Trezu treasury `earmark.sputnik-dao.near`, native USDC. Budgets, the three payment paths, the "ask to be paid" link, receipts, and since DAO vote #7 tasks (bounties) and near.com payouts.
+- **Testnet:** https://earmark-878141445235.us-central1.run.app. Everything above plus Telegram alerts and fees paid by Earmark (mainnet needs its own sponsor account and bot for these).
 - **Payouts are public on-chain.** Every check below is a keyless public read; the same checks run every 6 hours in CI.
 - **Machine-readable summary:** [`llms.txt`](llms.txt)
 
@@ -237,7 +237,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 
 ### Tasks (bounties) and trusted contributors
 
-**Installed on testnet** (11 Nov, reproducible build at `a5dcb74`, code `6H2m7r…BhRx`, DAO proposals 19 and 20; trust turned on for budget 0 by proposal 21: trusted after 2 accepted, paid tasks, up to 30 tUSDC). **Not on mainnet yet:** it goes in one upgrade together with NEAR Intents payouts, so mainnet still runs `G3SbqW…ZXtX` and its app says tasks aren't available. Research: `research/solution-research/17-bounty-board-research-2026-11-11.md`.
+**Installed on testnet** (11 Nov, reproducible build at `a5dcb74`, code `6H2m7r…BhRx`, DAO proposals 19 and 20; trust turned on for budget 0 by proposal 21: trusted after 2 accepted, paid tasks, up to 30 tUSDC). **Installed on mainnet** (13 Nov) together with NEAR Intents payouts: DAO proposal #7 (`UpgradeRemote`) moved `budgets.omkar5.near` to `DGwhd93…UGrx`; every budget, request and record reads the same. Trusted contributors stay off there (`set_task_rules` not voted). Research: `research/solution-research/17-bounty-board-research-2026-11-11.md`.
 
 - **Post:** a lead posts a task (title, brief link, amount, days to finish, optionally "only for" one payee). The amount is reserved in the budget at once (`committed`), so the contributor knows the money is there. A task is at most the one-approval limit; bigger work stays a normal request that goes to a DAO vote. Posting counts toward the lead's 100 requests per period, and a budget holds at most 50 reserved tasks.
 - **Claim and submit:** an approved payee who isn't a lead or approver of that budget claims it (one open claim, three when trusted) and sends a work link. The same work link can't be paid twice for them (`duplicate_work`). After the deadline anyone can reopen the claim.
@@ -247,7 +247,7 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 
 ### near.com payees (NEAR Intents)
 
-**Installed on testnet** (12 Nov, reproducible build at `508a355`, code `DGwhd93…UGrx`, DAO proposals 22 and 23), but off there: Intents has no testnet, so `intents_contract` is none and the app hides the option. Tried end to end on a throwaway contract paying a copy of the real Intents code. **Mainnet waits** for the one combined upgrade with tasks. Research: `research/solution-research/19-intents-receiving-verified-2026-11-11.md`.
+**Installed on testnet** (12 Nov, reproducible build at `508a355`, code `DGwhd93…UGrx`, DAO proposals 22 and 23), but off there: Intents has no testnet, so `intents_contract` is none and the app hides the option. Tried end to end on a throwaway contract paying a copy of the real Intents code. **On mainnet since DAO proposal #7** (13 Nov) with `intents_contract` = `intents.near`; no real near.com payout made there yet. Research: `research/solution-research/19-intents-receiving-verified-2026-11-11.md`.
 
 - **What it is:** an approver pastes a wallet address (`0x…`) in Add payee, and the app pays it on near.com (`approve_intents_payee`, same waiting period as any new payee). Earmark pays them with `ft_transfer_call` to the Intents contract with `msg` = their account id and nothing else, so it lands in their near.com balance. They withdraw on near.com with the same wallet (MetaMask, Phantom, passkey or a NEAR wallet) to Base or any other chain. A MetaMask user's id is their `0x…` address, lowercase. No token setup is needed for them.
 - **Paid only on full credit:** the payment counts as paid only when the token reports the full amount was kept (`ft_resolve_transfer`). A refund (Intents paused, bad id) fails it like any failed transfer: the money stays in the budget and the work link is free again. Earmark never sends Intents actions, so the Oct 2026 refund exploit (it needed a notify action) doesn't apply.
@@ -409,7 +409,7 @@ Web unit tests: `pnpm --dir apps/web test` (Vitest): the relay's checks and the 
 - Image from [`apps/web/Dockerfile`](apps/web/Dockerfile) (Next.js standalone output, Node 24, non-root), built by Cloud Build ([`apps/web/cloudbuild.yaml`](apps/web/cloudbuild.yaml)). The upload follows [`.gcloudignore`](.gcloudignore), so no `.env` file leaves the machine.
 - The two sandbox keys are Secret Manager secrets `try-lead-key` and `try-council-key`, readable only by the service account `earmark-web`.
 - Features 4 + 8 add Firestore (`(default)`, native, `us-central1`, free tier) for alert links, snapshots, message ids and relay counts. No money record lives there. They also add the secrets `relayer-key` (sponsor `gas.earmark.testnet`), `cron-secret`, `telegram-webhook-secret` and, once the bots exist, `telegram-token` / `telegram-token-mainnet`. `make deploy` passes only the secrets that exist, so a feature without its secret stays off. After a deploy with the bot token, `make alerts-setup [NET=mainnet]` sets the webhook and the every-minute Scheduler job.
-- Mainnet: a second service `earmark-mainnet` from its own image, since `NEXT_PUBLIC_*` settings are compiled in at build time (`make deploy-mainnet`, passed as Docker build args). It has no sandbox keys; "Try it" links to the testnet app. It reads contract `budgets.omkar5.near` (0 keys, code hash `Gqnu9U…RjFz` from commit `faf4c31`), owned by the Trezu treasury `earmark.sputnik-dao.near`, with native USDC. Fund a new contract account with its storage (≈1 NEAR per 100 kB of wasm) plus 0.5 NEAR, the reserve below which it refuses new payments.
+- Mainnet: a second service `earmark-mainnet` from its own image, since `NEXT_PUBLIC_*` settings are compiled in at build time (`make deploy-mainnet`, passed as Docker build args). It has no sandbox keys; "Try it" links to the testnet app. It reads contract `budgets.omkar5.near` (0 keys, code hash `DGwhd93…UGrx` from commit `508a355`, installed by DAO proposal #7), owned by the Trezu treasury `earmark.sputnik-dao.near`, with native USDC. Fund a new contract account with its storage (≈1 NEAR per 100 kB of wasm) plus 0.5 NEAR, the reserve below which it refuses new payments.
 
 ## License
 
