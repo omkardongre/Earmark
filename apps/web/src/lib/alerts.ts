@@ -110,6 +110,17 @@ export function when(ms: number): string {
   return `${day.replace(",", "")}, ${time} UTC`;
 }
 
+/** A bold headline and one plain detail line: scannable in a busy group chat. */
+const two = (head: string, detail: string) => `<b>${head}</b>\n${detail}`;
+
+/** The linked people among `accounts`, as @mentions; nobody else is listed. */
+function mentioned(accounts: string[], mentions: Mentions): string {
+  return accounts
+    .filter((a) => mentions.has(a))
+    .map((a) => who(a, mentions))
+    .join(" ");
+}
+
 /**
  * What to post for one change: a new message, an edit of the item's first message, or nothing.
  * `hasThread` says whether the item already has a message to edit.
@@ -121,22 +132,25 @@ export function message(
 ): { kind: "send" | "edit"; msg: Message } | null {
   const { item } = c;
   const m = (amount: string) => esc(money(amount, ctx.meta));
-  const budget = `<i>${esc(ctx.budgetName)}</i>`;
+  const budget = esc(ctx.budgetName);
   if (item.kind === "request") {
     const r = item;
     const open = { text: "Open payment", url: `${ctx.app}/payments/${r.id}` };
+    const to = `${m(r.amount)} to ${who(r.payee, ctx.mentions)}`;
     const final = (text: string, dm: string[]) =>
       ({ kind: hasThread ? "edit" : "send", msg: { text, button: open, dm } }) as const;
     switch (r.status) {
       case "pending_approval": {
         const approvers = ctx.approvers.filter((a) => a !== r.spender);
+        const tags = mentioned(approvers, ctx.mentions);
         return {
           kind: "send",
           msg: {
             text:
-              `✋ ${m(r.amount)} to ${who(r.payee, ctx.mentions)} from ${budget}. ` +
-              `Needs 1 approver: ${approvers.map((a) => who(a, ctx.mentions)).join(", ")}.\n` +
-              `Asked by ${who(r.spender, ctx.mentions)}. Expires ${when(r.expiresMs)}.`,
+              two(
+                `✋ ${to} needs approval`,
+                `${budget} · asked by ${who(r.spender, ctx.mentions)} · expires ${when(r.expiresMs)}`,
+              ) + (tags ? `\n${tags}` : ""),
             // The approval card (with the budget context and Approve) is on the Approvals tab.
             button: { text: "Review payment", url: `${ctx.app}/approvals#pay-${r.id}` },
             dm: approvers,
@@ -145,40 +159,35 @@ export function message(
       }
       case "paid":
       case "paid_by_dao":
-        return final(`✅ Paid ${m(r.amount)} to ${who(r.payee, ctx.mentions)} from ${budget}.`, [
-          r.payee,
-        ]);
+        return final(two(`✅ Paid ${to}`, budget), [r.payee]);
       case "rejected":
         return hasThread
           ? final(
-              `✖ Not paid: ${m(r.amount)} to ${who(r.payee, ctx.mentions)}. Rejected${r.decidedBy ? ` by ${who(r.decidedBy, ctx.mentions)}` : ""}.`,
+              two(
+                `✖ Not paid: ${to}`,
+                r.decidedBy ? `Rejected by ${who(r.decidedBy, ctx.mentions)}` : "Rejected",
+              ),
               [r.payee, r.spender],
             )
           : null;
       case "expired":
         return hasThread
-          ? final(
-              `✖ Not paid: ${m(r.amount)} to ${who(r.payee, ctx.mentions)}. Nobody approved it in time.`,
-              [r.payee, r.spender],
-            )
+          ? final(two(`✖ Not paid: ${to}`, "Nobody approved it in time"), [r.payee, r.spender])
           : null;
       case "failed":
-        return final(
-          `⚠️ Payment failed: ${m(r.amount)} to ${who(r.payee, ctx.mentions)}. The money is back in ${budget}.`,
-          [r.payee, r.spender],
-        );
+        return final(two(`⚠️ Payment failed: ${to}`, `The money is back in ${budget}`), [
+          r.payee,
+          r.spender,
+        ]);
       case "escalation_closed":
         return hasThread
-          ? final(
-              `✖ Not paid: the DAO didn't pay ${m(r.amount)} to ${who(r.payee, ctx.mentions)}.`,
-              [r.payee],
-            )
+          ? final(two(`✖ Not paid: ${to}`, "The DAO didn’t approve it"), [r.payee])
           : null;
       case "escalated":
         return {
           kind: hasThread ? "edit" : "send",
           msg: {
-            text: `🗳 ${m(r.amount)} to ${who(r.payee, ctx.mentions)} from ${budget} needs a DAO vote.`,
+            text: two(`🗳 ${to} needs a DAO vote`, budget),
             button: r.daoProposal ? { text: "Open the vote", url: ctx.trezu(r.daoProposal) } : open,
           },
         };
@@ -186,7 +195,7 @@ export function message(
         return {
           kind: hasThread ? "edit" : "send",
           msg: {
-            text: `💰 The DAO paid in ${m(r.amount)} for ${who(r.payee, ctx.mentions)}. Anyone can finish the payout.`,
+            text: two(`💰 The DAO approved ${to}`, "Anyone can finish the payout"),
             button: { text: "Finish payout", url: open.url },
           },
         };
@@ -198,12 +207,13 @@ export function message(
     const t = item;
     const open = { text: "Review work", url: `${ctx.app}/budgets/${ctx.budgetId}/tasks/${t.id}` };
     const by = t.claimant ? who(t.claimant, ctx.mentions) : "Someone";
-    const title = `<i>${esc(t.title)}</i>`;
+    const title = esc(t.title);
+    const lead = who(t.lead, ctx.mentions);
     if (t.status === "submitted") {
       return {
         kind: "send",
         msg: {
-          text: `📝 ${by} sent work for ${title} (${m(t.amount)}). ${who(t.lead, ctx.mentions)} to review.`,
+          text: two(`📝 ${by} sent work for ${title}`, `${m(t.amount)} · ${lead} to review`),
           button: open,
           dm: [t.lead],
         },
@@ -212,12 +222,12 @@ export function message(
     if (!hasThread || c.from !== "submitted") return null;
     const text =
       t.status === "claimed"
-        ? `↩ ${who(t.lead, ctx.mentions)} asked for changes to ${title}.`
+        ? two(`↩ Changes asked for ${title}`, `By ${lead}`)
         : t.status === "open"
-          ? `✖ ${who(t.lead, ctx.mentions)} turned down the work for ${title}. The task is open again.`
+          ? two(`✖ Work turned down: ${title}`, "The task is open again")
           : t.status === "cancelled"
-            ? `✖ ${title} was cancelled.`
-            : `✓ ${who(t.lead, ctx.mentions)} accepted the work for ${title}.`;
+            ? two(`✖ Cancelled: ${title}`, budget)
+            : two(`✓ Work accepted: ${title}`, `By ${lead}`);
     return { kind: "edit", msg: { text, button: { text: "Open task", url: open.url } } };
   }
   const ch = item;
@@ -227,9 +237,10 @@ export function message(
     return {
       kind: "send",
       msg: {
-        text:
-          `⚠️ ${who(ch.by, ctx.mentions)} asked: ${esc(ch.text)} (${budget}).\n` +
-          `Can be applied after ${when(ch.effectiveMs)}. Any approver can cancel it before then.`,
+        text: two(
+          `⚠️ ${who(ch.by, ctx.mentions)} asked: ${esc(ch.text)}`,
+          `${budget} · can be applied after ${when(ch.effectiveMs)}. Any approver can cancel it.`,
+        ),
         button: review,
         dm: approvers,
       },
@@ -238,7 +249,7 @@ export function message(
   if (!hasThread) return null;
   const done =
     ch.status === "applied" ? "Now in effect" : ch.status === "cancelled" ? "Cancelled" : "Expired";
-  return { kind: "edit", msg: { text: `${done}: ${esc(ch.text)} (${budget}).` } };
+  return { kind: "edit", msg: { text: two(`${done}: ${esc(ch.text)}`, budget) } };
 }
 
 /** A waiting payment gets one reminder this long before it expires. */

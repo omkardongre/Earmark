@@ -49,8 +49,9 @@ describe("message", () => {
     expect(out?.kind).toBe("send");
     expect(out?.msg.text).toContain("40 USDC");
     expect(out?.msg.text).toContain('<a href="tg://user?id=42">Priya</a>');
-    // The spender can't approve their own payment, so isn't asked.
-    expect(out?.msg.text).not.toMatch(/approver:.*Maya/);
+    // Only linked people are tagged; the spender can't approve their own payment.
+    expect(out?.msg.text).toMatch(/^<b>✋ 40 USDC to Bob needs approval<\/b>/);
+    expect(out?.msg.text.split("\n")[2]).toBe('<a href="tg://user?id=42">Priya</a>');
     expect(out?.msg.text).toContain("News &lt;contributors&gt;");
     expect(out?.msg.dm).toEqual(["priya.earmark.testnet"]);
   });
@@ -58,7 +59,7 @@ describe("message", () => {
     expect(message({ item: req("paid"), from: "pending_approval" }, ctx, true)?.kind).toBe("edit");
     const instant = message({ item: req("paid"), from: null }, ctx, false);
     expect(instant?.kind).toBe("send");
-    expect(instant?.msg.text).toMatch(/^✅ Paid 40 USDC/);
+    expect(instant?.msg.text).toMatch(/^<b>✅ Paid 40 USDC to Bob<\/b>/);
   });
   it("says a queued change can be applied after its time, not that it applies itself", () => {
     const out = message(
@@ -76,7 +77,7 @@ describe("message", () => {
       ctx,
       false,
     );
-    expect(out?.msg.text).toContain("Can be applied after Sat 14 Nov, 14:05 UTC");
+    expect(out?.msg.text).toContain("can be applied after Sat 14 Nov, 14:05 UTC");
   });
 });
 

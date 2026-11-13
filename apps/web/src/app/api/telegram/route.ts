@@ -43,9 +43,9 @@ function secretOk(req: Request): boolean {
 }
 
 const HELP =
-  "I post Earmark alerts: work to review, payments that need an approver, rule changes, and " +
-  "“Paid”. Buttons open Earmark; your wallet signs there. I can’t approve or move money.\n" +
-  "Get a link on a budget page (“Alerts in Telegram”). /stop ends alerts in this chat.";
+  "Earmark alerts: payments to approve, work to review, and when they’re paid. " +
+  "Buttons open Earmark, where your wallet signs. I can’t move money.\n" +
+  "/stop turns alerts off in this chat.";
 
 async function reply(chatId: number, text: string) {
   try {
@@ -78,7 +78,8 @@ async function start(u: NonNullable<Update["message"]>, code: string) {
     });
     return reply(
       chatId,
-      `This chat now gets Earmark alerts for <i>${esc(b?.name ?? `budget ${link.budgetId}`)}</i>.`,
+      `<b>Connected to ${esc(b?.name ?? `budget ${link.budgetId}`)}</b>\n` +
+        "I’ll post here when a payment needs approval or work is sent. /stop turns this off.",
     );
   }
   if (link.kind === "me" && link.account && u.from) {
