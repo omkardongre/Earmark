@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "id": "earmark-create-budget",
+  "title": "Earmark: create a budget",
+  "description": "A USDC budget with one lead, one approver and one payee. Add more people later with the other Earmark forms. The DAO funds it with \"Earmark: fund a budget\".",
+  "binding": {
+    "receiver_id": "budgets.omkar5.near",
+    "method_name": "create_envelope",
+    "deposit": "100000000000000000000000",
+    "gas": "50000000000000"
+  },
+  "fields": [
+    {
+      "name": "name",
+      "label": "Budget name",
+      "type": "text",
+      "required": true,
+      "help": "For example \"Content Q1\"."
+    },
+    {
+      "name": "lead",
+      "label": "Lead",
+      "type": "account",
+      "required": true,
+      "help": "Reviews work and pays from the budget."
+    },
+    {
+      "name": "lead_limit",
+      "label": "Lead pays at once up to",
+      "type": "amount",
+      "required": true,
+      "help": "Payments up to this need no approval. In USDC's smallest unit: 1 USDC = 1000000, 0.25 USDC = 250000."
+    },
+    {
+      "name": "approver",
+      "label": "Approver",
+      "type": "account",
+      "required": true,
+      "help": "Approves payments above the lead's limit. Must not be the lead."
+    },
+    {
+      "name": "approval_limit",
+      "label": "One approval covers up to",
+      "type": "amount",
+      "required": true,
+      "help": "Above this, a payment becomes a normal DAO vote. Must be at least the lead's limit. In USDC's smallest unit: 1 USDC = 1000000, 0.25 USDC = 250000."
+    },
+    {
+      "name": "monthly_cap",
+      "label": "Most it can pay in 30 days",
+      "type": "amount",
+      "required": true,
+      "help": "In USDC's smallest unit: 1 USDC = 1000000, 0.25 USDC = 250000."
+    },
+    {
+      "name": "payee",
+      "label": "First payee",
+      "type": "account",
+      "required": true,
+      "help": "Who can be paid. Add more later."
+    }
+  ],
+  "args": {
+    "envelope": {
+      "name": "{{name}}",
+      "token_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+      "spenders": [
+        {
+          "account_id": "{{lead}}",
+          "auto_limit": "{{lead_limit}}",
+          "period_cap": "{{monthly_cap}}"
+        }
+      ],
+      "approvers": ["{{approver}}"],
+      "one_approver_limit": "{{approval_limit}}",
+      "raise_ceiling": "{{lead_limit}}",
+      "payees": ["{{payee}}"],
+      "period_secs": "2592000",
+      "period_cap": "{{monthly_cap}}",
+      "pending_ttl_secs": null
+    }
+  },
+  "summary": "Create Earmark budget \"{{name}}\": {{lead}} pays at once up to {{lead_limit}}, {{approver}} approves up to {{approval_limit}}, at most {{monthly_cap}} per 30 days (USDC base units)"
+}

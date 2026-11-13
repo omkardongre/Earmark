@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "id": "earmark-fund-budget",
+  "title": "Earmark: fund a budget",
+  "description": "Moves USDC from the treasury into an Earmark budget. Only the DAO can fund a budget; anything else is refunded.",
+  "binding": {
+    "receiver_id": "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+    "method_name": "ft_transfer_call",
+    "deposit": "1",
+    "gas": "50000000000000"
+  },
+  "fields": [
+    {
+      "name": "budget_id",
+      "label": "Budget number",
+      "type": "uint",
+      "required": true,
+      "help": "Shown in the budget's address on Earmark: /budgets/0 is budget 0."
+    },
+    {
+      "name": "amount",
+      "label": "Amount",
+      "type": "amount",
+      "required": true,
+      "help": "In USDC's smallest unit: 1 USDC = 1000000, 0.25 USDC = 250000."
+    }
+  ],
+  "args": {
+    "receiver_id": "budgets.omkar5.near",
+    "amount": "{{amount}}",
+    "msg": "{\"envelope_id\":\"{{budget_id}}\"}"
+  },
+  "summary": "Fund Earmark budget {{budget_id}} with {{amount}} (USDC base units)"
+}

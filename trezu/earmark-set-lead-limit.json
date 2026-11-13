@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "id": "earmark-set-lead-limit",
+  "title": "Earmark: change a lead's limit",
+  "description": "Sets how much a lead pays at once without approval. Lowering applies at once. Raising waits 1 day, and any approver can cancel it.",
+  "binding": {
+    "receiver_id": "budgets.omkar5.near",
+    "method_name": "update_envelope",
+    "deposit": "0",
+    "gas": "30000000000000"
+  },
+  "fields": [
+    {
+      "name": "budget_id",
+      "label": "Budget number",
+      "type": "uint",
+      "required": true,
+      "help": "Shown in the budget's address on Earmark: /budgets/0 is budget 0."
+    },
+    {
+      "name": "lead",
+      "label": "Lead",
+      "type": "account",
+      "required": true
+    },
+    {
+      "name": "amount",
+      "label": "New limit",
+      "type": "amount",
+      "required": true,
+      "help": "In USDC's smallest unit: 1 USDC = 1000000, 0.25 USDC = 250000."
+    }
+  ],
+  "args": {
+    "envelope_id": "{{budget_id}}",
+    "changes": [
+      {
+        "spender_auto_limit": {
+          "spender": "{{lead}}",
+          "amount": "{{amount}}"
+        }
+      }
+    ]
+  },
+  "summary": "Earmark budget {{budget_id}}: {{lead}} pays at once up to {{amount}} (USDC base units)"
+}

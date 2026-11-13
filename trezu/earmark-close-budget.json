@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "id": "earmark-close-budget",
+  "title": "Earmark: close a budget",
+  "description": "Closes the budget for good. Waiting payments are cancelled and the money left goes back to the treasury.",
+  "binding": {
+    "receiver_id": "budgets.omkar5.near",
+    "method_name": "close_envelope",
+    "deposit": "0",
+    "gas": "50000000000000"
+  },
+  "fields": [
+    {
+      "name": "budget_id",
+      "label": "Budget number",
+      "type": "uint",
+      "required": true,
+      "help": "Shown in the budget's address on Earmark: /budgets/0 is budget 0."
+    }
+  ],
+  "args": {
+    "envelope_id": "{{budget_id}}"
+  },
+  "summary": "Close Earmark budget {{budget_id}} and return what's left to the treasury"
+}
