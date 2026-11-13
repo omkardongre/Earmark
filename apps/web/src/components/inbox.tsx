@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { describeChange } from "@/lib/activity";
 import { CONTRACT } from "@/lib/config";
 import { ago, duration, isWalletAddress, STATUS, shortName, toBase } from "@/lib/format";
 import { nearComAddress } from "@/lib/intents";
@@ -10,17 +11,7 @@ import { isAccountId, nearAmount } from "@/lib/token";
 import type { RequestStatus } from "@/lib/types";
 import { useRegistration } from "./pay-sheet";
 import { useToast } from "./toast";
-import {
-  Button,
-  ButtonLink,
-  Card,
-  Disclosure,
-  Empty,
-  ExternalLink,
-  Person,
-  Pill,
-  Section,
-} from "./ui";
+import { Button, ButtonLink, Card, Disclosure, Empty, Person, Pill, Section } from "./ui";
 import { FeeNote, useWallet } from "./wallet";
 
 export type InboxBudget = {
@@ -33,10 +24,8 @@ export type InboxBudget = {
   symbol: string;
   decimals: number;
   ceiling: string;
-  /** Free to spend, set aside (pending payments and tasks), and on its way to payees. */
+  /** Free to spend (this payment is already set aside, so it doesn't drop again). */
   left: string;
-  held: string;
-  sending: string | null;
   pending: {
     id: string;
     spender: string;
@@ -76,6 +65,8 @@ export type InboxBudget = {
   }[];
 };
 
+type Change = InboxBudget["changes"][number];
+
 type Recent = {
   id: string;
   amount: string;
@@ -97,6 +88,8 @@ type Local = {
   /** "budget|spender" -> when the queued unpause applies (ms). */
   unpausing: Map<string, number>;
   changesGone: Set<string>;
+  /** Changes just queued here (a raise, an unpause), by change id, so Cancel shows at once. */
+  changesQueued: Map<string, Change & { budget: string }>;
   /** "budget|payee" -> when a just-queued new payee becomes payable (ms). */
   payeesQueued: Map<string, number>;
   /** "budget|payee" of payees just made payable. */
@@ -111,6 +104,7 @@ const fresh = (): Local => ({
   paused: new Map(),
   unpausing: new Map(),
   changesGone: new Set(),
+  changesQueued: new Map(),
   payeesQueued: new Map(),
   payeesAdded: new Set(),
   nearComAdded: new Set(),
@@ -136,6 +130,16 @@ function countdown(ms: number, now: number): string | null {
   return h > 0 ? `${h} h ${m} min` : `${m}:${String(s).padStart(2, "0")}`;
 }
 const nsToMs = (ns: string) => Number(BigInt(ns) / 1_000_000n);
+
+/** One fact on the approval card: a grey label, then the value. */
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-muted">{label}</dt>
+      <dd className="min-w-0 text-right font-medium">{children}</dd>
+    </>
+  );
+}
 /** Adding a payee, paid to their NEAR account or to near.com. */
 const isPayeeAdd = (kind: string) => kind === "add_payee" || kind === "add_intents_payee";
 
@@ -163,7 +167,9 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
     if (!hash.startsWith("pay-")) return setLinked("");
     const el = document.getElementById(hash);
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // scroll-mt on the card leaves room for the sticky header and the section title.
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
     setLinked(hash);
   });
 
@@ -214,6 +220,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
         paused: new Map(prev.paused),
         unpausing: new Map(prev.unpausing),
         changesGone: new Set(prev.changesGone),
+        changesQueued: new Map(prev.changesQueued),
         payeesQueued: new Map(prev.payeesQueued),
         payeesAdded: new Set(prev.payeesAdded),
         nearComAdded: new Set(prev.nearComAdded),
@@ -255,6 +262,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
           : "Approved, but the payment didn’t go through. Nothing was spent."
         : `Rejected ${p.amount} to ${shortName(p.payee)}`,
       href: `/payments/${p.id}`,
+      fee: !!r.sponsored,
     });
     return true;
   };
@@ -266,7 +274,36 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
     ...[...(live?.decided.values() ?? [])].filter((d) => mine.some((b) => b.id === d.budget)),
     ...mine.flatMap((b) => b.recent).filter((r) => !live?.decided.has(r.id)),
   ].slice(0, 3);
-  const changesOf = (b: InboxBudget) => b.changes.filter((c) => !live?.changesGone.has(c.id));
+  const changesOf = (b: InboxBudget) => {
+    const known = new Set(b.changes.map((c) => c.id));
+    const mineNow = [...(live?.changesQueued.values() ?? [])].filter(
+      (c) => c.budget === b.id && !known.has(c.id),
+    );
+    return [...b.changes, ...mineNow].filter((c) => !live?.changesGone.has(c.id));
+  };
+  /** Keeps a change this screen just queued, until the server list shows it. */
+  const queued = (
+    b: InboxBudget,
+    value: unknown,
+    change: Record<string, Record<string, string | null>>,
+  ) => {
+    // The contract answers the new change's id (U64, sent as a string).
+    if (typeof value !== "string" && typeof value !== "number") return;
+    const [kind = "", v = {}] = Object.entries(change)[0] ?? [];
+    const id = String(value);
+    remember((l) =>
+      l.changesQueued.set(id, {
+        id,
+        kind,
+        spender: v.spender ?? null,
+        payee: null,
+        text: describeChange(change, b),
+        by: accountId,
+        effectiveNs: String(BigInt(Date.now() + delaySecs * 1000) * 1_000_000n),
+        budget: b.id,
+      }),
+    );
+  };
   const waitingChanges = mine.reduce((n, b) => n + changesOf(b).length, 0);
   // Controls open by themselves when a change waits, and stay open once open: applying the last
   // change mustn't fold the panel away under the user.
@@ -309,7 +346,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                 if (c.kind === "add_intents_payee" && c.payee)
                   l.nearComAdded.add(`${b.id}|${c.payee}`);
               });
-              toast({ ok: true, text: appliedText(c), tx: r.hash });
+              toast({ ok: true, text: appliedText(c), tx: r.hash, fee: !!r.sponsored });
             }}
           >
             {label(cKey, applyLabel)}
@@ -324,7 +361,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
               l.changesGone.add(c.id);
               l.unpausing.delete(`${b.id}|${c.spender ?? ""}`);
             });
-            toast({ ok: true, text: `Cancelled: ${c.text}`, tx: r.hash });
+            toast({ ok: true, text: `Cancelled: ${c.text}`, tx: r.hash, fee: !!r.sponsored });
           }}
         >
           {label(xKey, "Cancel")}
@@ -354,6 +391,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
         ? `${name ?? shortName(spenderId)} is paused. Their payments stop now.`
         : "Budget paused. No payments go out.",
       tx: r.hash,
+      fee: !!r.sponsored,
     });
   };
 
@@ -363,59 +401,68 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
         {pending.length === 0 ? (
           <Empty>Nothing needs you right now ✓</Empty>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className={pending.length === 1 ? "max-w-xl" : "grid gap-4 md:grid-cols-2"}>
             {pending.map((p) => {
               const own = p.spender === accountId;
               const left = countdown(nsToMs(p.expiresNs), now);
+              const soon = nsToMs(p.expiresNs) - now < 6 * 3600_000;
+              const isUrl = /^https?:\/\//.test(p.work);
               return (
                 <Card
                   key={p.id}
                   id={`pay-${p.id}`}
-                  className={`flex scroll-mt-24 flex-col gap-4 p-5 ${linked === `pay-${p.id}` ? "ring-2 ring-brand" : ""}`}
+                  className={`flex scroll-mt-32 flex-col gap-5 p-5 sm:p-6 ${linked === `pay-${p.id}` ? "ring-2 ring-brand" : ""}`}
                 >
+                  {/* What you approve: how much, to whom, and who asked. */}
                   <div className="space-y-1">
-                    <p className="text-sm text-muted">{p.budget.name}</p>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-muted">{p.budget.name}</span>
+                      <span
+                        className={`tabular font-medium ${!left ? "text-rose-700" : soon ? "text-amber-700" : "text-muted"}`}
+                      >
+                        {left ? `${left} left` : "Expired"}
+                      </span>
+                    </div>
                     <p className="tabular text-3xl font-bold tracking-tight">{p.amount}</p>
                     <p className="flex flex-wrap items-center gap-1.5 text-muted">
-                      <Person id={p.spender} /> wants to pay <Person id={p.payee} />
+                      to <Person id={p.payee} />
+                    </p>
+                    <p className="text-sm text-muted">
+                      {shortName(p.spender)} asked · {ago(p.createdNs)}
                     </p>
                   </div>
-                  <div className="space-y-1 text-[15px]">
-                    <p className="break-words">
-                      {/^https?:\/\//.test(p.work) ? (
-                        <ExternalLink href={p.work}>
-                          {p.work.replace(/^https?:\/\//, "")}
-                        </ExternalLink>
-                      ) : (
-                        p.work
+                  {(p.memo || p.work) && (
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="min-w-0 break-words">{p.memo || (isUrl ? "" : p.work)}</p>
+                      {isUrl && (
+                        <a
+                          href={p.work}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={p.work}
+                          className="shrink-0 font-semibold text-brand hover:underline"
+                        >
+                          View work ↗
+                        </a>
                       )}
-                    </p>
-                    {p.memo && <p className="text-muted">“{p.memo}”</p>}
+                    </div>
+                  )}
+                  {/* Only the facts that change the decision. */}
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-line pt-4 text-[15px]">
+                    {p.why && <Row label="Why you">{p.why}</Row>}
+                    <Row label="Budget left">{p.budget.left}</Row>
+                    {p.history && <Row label="Paid before">{p.history}</Row>}
                     {p.task && (
-                      <p className="text-sm text-muted">
-                        From task{" "}
+                      <Row label="From task">
                         <Link
                           className="font-medium text-brand hover:underline"
                           href={`/budgets/${p.budget.id}/tasks/${p.task.id}`}
                         >
                           {p.task.title}
                         </Link>
-                        . {shortName(p.task.lead)} accepted the work.
-                      </p>
+                      </Row>
                     )}
-                  </div>
-                  <div className="space-y-1 rounded-xl bg-slate-50 px-3.5 py-3 text-sm">
-                    {p.why && <p className="font-medium">{p.why}</p>}
-                    <p className="text-muted">
-                      {/* This payment is already in Held, so Left doesn't drop again. */}
-                      Left {p.budget.left} · Held {p.budget.held} (this one included)
-                      {p.budget.sending ? ` · Sending ${p.budget.sending}` : ""}
-                    </p>
-                    {p.history && <p className="text-muted">{p.history}</p>}
-                    <p className="text-muted">
-                      {ago(p.createdNs)} · {left ? `expires in ${left}` : "expired"}
-                    </p>
-                  </div>
+                  </dl>
                   <div className="mt-auto flex gap-2">
                     {!left ? (
                       <Button
@@ -438,18 +485,17 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                             ok: true,
                             text: "Released. The money is free again.",
                             tx: r.hash,
+                            fee: !!r.sponsored,
                           });
                         }}
                       >
                         {label(p.id, "Release")}
                       </Button>
                     ) : own ? (
-                      <p className="text-sm text-muted">
-                        Your own payment. Another approver decides.
-                      </p>
+                      <p className="text-muted">Your own payment. Another approver decides.</p>
                     ) : (
                       <>
-                        <Button className="flex-1" onClick={() => decide(p, true)}>
+                        <Button className="flex-[2]" onClick={() => decide(p, true)}>
                           {label(p.id, "Approve")}
                         </Button>
                         <Button
@@ -462,7 +508,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                       </>
                     )}
                   </div>
-                  {!own && left && <FeeNote className="-mt-2" />}
+                  {!own && left && <FeeNote className="-mt-2" signing={busy === p.id} />}
                 </Card>
               );
             })}
@@ -545,10 +591,12 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                           const r = await run(bKey, "unpause", { envelope_id: b.id });
                           if (!r) return;
                           remember((l) => l.unpausing.set(bKey, Date.now() + delaySecs * 1000));
+                          queued(b, r.value, { unpause: { spender: null } });
                           toast({
                             ok: true,
                             text: `The budget unpauses in ${later}. Any approver can cancel.`,
                             tx: r.hash,
+                            fee: !!r.sponsored,
                           });
                         }}
                       >
@@ -618,7 +666,6 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                             <Person id={s.id} />
                             <span className="text-sm text-muted">up to {s.limit}</span>
                             {paused && <Pill tone="amber">Paused</Pill>}
-                            {!paused && s.eligible && <Pill tone="green">Can get a raise</Pill>}
                           </span>
                           {paused && s.paused && s.pausedBy && s.pausedNs && (
                             <span className="block text-sm text-muted">
@@ -629,7 +676,10 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                         <span className="flex items-center gap-2">
                           {s.id !== accountId && s.eligible && !paused && (
                             <RaiseButton
+                              name={name}
+                              limit={s.limit}
                               ceiling={b.ceiling}
+                              delay={later}
                               symbol={b.symbol}
                               decimals={b.decimals}
                               busy={busy === `r${sKey}`}
@@ -640,10 +690,14 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                                   new_limit: amount,
                                 });
                                 if (!r) return false;
+                                queued(b, r.value, {
+                                  spender_auto_limit: { spender: s.id, amount },
+                                });
                                 toast({
                                   ok: true,
                                   text: `${name}’s new limit applies in ${later}. Any approver can cancel.`,
                                   tx: r.hash,
+                                  fee: !!r.sponsored,
                                 });
                                 return true;
                               }}
@@ -666,10 +720,12 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                                   remember((l) =>
                                     l.unpausing.set(sKey, Date.now() + delaySecs * 1000),
                                   );
+                                  queued(b, r.value, { unpause: { spender: s.id } });
                                   toast({
                                     ok: true,
                                     text: `${name} will be unpaused in ${later}. Any approver can cancel.`,
                                     tx: r.hash,
+                                    fee: !!r.sponsored,
                                   });
                                 }}
                               >
@@ -756,7 +812,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                       delay={later}
                       busy={busy === `p${b.id}`}
                       run={(method, args, opts) => run(`p${b.id}`, method, args, opts)}
-                      onAdded={(payee, hash, nearCom) => {
+                      onAdded={(payee, hash, nearCom, fee) => {
                         remember((l) => {
                           l.payeesQueued.set(`${b.id}|${payee}`, Date.now() + delaySecs * 1000);
                           if (nearCom) l.nearComAdded.add(`${b.id}|${payee}`);
@@ -765,6 +821,7 @@ export function Inbox({ budgets, delaySecs }: { budgets: InboxBudget[]; delaySec
                           ok: true,
                           text: `${shortName(payee)} can be paid in ${later}. Any approver can cancel.`,
                           tx: hash,
+                          fee,
                         });
                       }}
                     />
@@ -941,51 +998,103 @@ function PauseConfirmDialog({
   );
 }
 
+/** "Raise limit" opens a small sheet: the new amount, what happens next, one button. */
 function RaiseButton({
+  name,
+  limit,
   ceiling,
+  delay,
   symbol,
   decimals,
   busy,
   onRaise,
 }: {
+  name: string;
+  /** The current and highest limits, as shown ("10 tUSDC"). */
+  limit: string;
   ceiling: string;
+  delay: string;
   symbol: string;
   decimals: number;
   busy: boolean;
   onRaise: (amount: string) => Promise<boolean>;
 }) {
-  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDialogElement>(null);
   const [value, setValue] = useState("");
-  if (!open) {
-    return (
-      <Button variant="secondary" onClick={() => setOpen(true)}>
-        Raise limit
-      </Button>
-    );
-  }
-  const base = toBase(value, { symbol, decimals });
+  const hint = useId();
+  const meta = { symbol, decimals };
+  const shown = (s: string) => toBase(s.split(" ")[0]?.replaceAll(",", "") ?? "", meta);
+  const base = toBase(value, meta);
+  const max = shown(ceiling);
+  const now = shown(limit);
+  const problem =
+    !value.trim() || base === null
+      ? null
+      : max !== null && BigInt(base) > BigInt(max)
+        ? `The most is ${ceiling}.`
+        : now !== null && BigInt(base) <= BigInt(now)
+          ? `Enter more than ${limit}.`
+          : null;
+  const ok = base !== null && problem === null;
   return (
-    <span className="flex items-center gap-2">
-      <input
-        className="tabular h-11.5 w-28 rounded-xl border border-slate-300 px-3"
-        inputMode="decimal"
-        placeholder={`max ${ceiling}`}
-        aria-label="New limit"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-      />
+    <>
       <Button
-        disabled={!base}
-        onClick={async () => {
-          if (base && (await onRaise(base))) {
-            setOpen(false);
-            setValue("");
-          }
+        variant="secondary"
+        onClick={() => {
+          setValue("");
+          ref.current?.showModal();
         }}
       >
-        {busy ? "Confirm in wallet…" : "Queue"}
+        {busy ? "Confirm in wallet…" : "Raise limit"}
       </Button>
-    </span>
+      <dialog
+        ref={ref}
+        className="m-auto w-full max-w-md rounded-3xl p-0 shadow-xl max-sm:mb-0 max-sm:max-w-none max-sm:rounded-b-none"
+      >
+        <form
+          method="dialog"
+          className="space-y-5 p-6"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!ok || !base) return;
+            // Close first: a modal dialog would sit over the wallet's popup.
+            ref.current?.close();
+            await onRaise(base);
+          }}
+        >
+          <div className="space-y-1">
+            <h2 className="text-xl font-semibold">New limit for {name}</h2>
+            <p className="text-muted">Now {limit}.</p>
+          </div>
+          <label className="block space-y-1.5">
+            <span className="font-medium">Pays instantly up to</span>
+            <span className="flex h-11.5 items-center rounded-xl border border-slate-300 focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/20">
+              <input
+                className="tabular h-full min-w-0 flex-1 rounded-xl px-3.5 outline-none"
+                inputMode="decimal"
+                autoComplete="off"
+                aria-describedby={hint}
+                aria-invalid={!!problem}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+              />
+              <span className="pr-3.5 text-muted">{symbol}</span>
+            </span>
+            <span id={hint} className={`block text-sm ${problem ? "text-rose-600" : "text-muted"}`}>
+              {problem ?? `Max ${ceiling}. Applies in ${delay}. Any approver can cancel.`}
+            </span>
+          </label>
+          <div className="flex gap-2">
+            <Button variant="secondary" className="flex-1" onClick={() => ref.current?.close()}>
+              Cancel
+            </Button>
+            <Button type="submit" className="flex-1" disabled={!ok}>
+              {ok ? `Raise to ${value.trim()} ${symbol}` : "Raise"}
+            </Button>
+          </div>
+        </form>
+      </dialog>
+    </>
   );
 }
 
@@ -1022,7 +1131,7 @@ type Run = (
   method: string,
   args: object,
   opts?: { receiverId?: string; deposit?: string },
-) => Promise<{ hash: string } | null>;
+) => Promise<{ hash: string; sponsored?: boolean } | null>;
 
 /**
  * Add a payee in one step, from one box: the app tells a NEAR account from a wallet address.
@@ -1046,7 +1155,7 @@ function AddPayee({
   delay: string;
   busy: boolean;
   run: Run;
-  onAdded: (payee: string, hash: string, nearCom: boolean) => void;
+  onAdded: (payee: string, hash: string, nearCom: boolean, fee: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
@@ -1088,7 +1197,7 @@ function AddPayee({
     const r = await run(method, { envelope_id: budgetId, payee });
     setStep(null);
     if (!r) return;
-    onAdded(payee, r.hash, nearCom);
+    onAdded(payee, r.hash, nearCom, !!r.sponsored);
     close();
   };
 
@@ -1219,11 +1328,12 @@ export function BudgetAddPayee({
         delay={later}
         busy={busy}
         run={run}
-        onAdded={(payee) =>
+        onAdded={(payee, _hash, _nearCom, fee) =>
           toast({
             ok: true,
             text: `${shortName(payee)} can be paid in ${later}. Make them payable in Approvals.`,
             href: "/approvals",
+            fee,
           })
         }
       />

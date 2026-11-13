@@ -49,14 +49,15 @@ async function context(
                 limit = BigInt(trust.trusted_limit);
             }
             const h = history[r.payee];
+            // Short values for the card's rows ("Why you", "Paid before"), not sentences.
             out.set(rid, {
               why:
                 limit > 0n
-                  ? `More than ${shortName(r.spender)} can pay alone (${money(limit, m)}). Needs 1 approver.`
-                  : `${shortName(r.spender)} can’t pay alone from this budget. Needs 1 approver.`,
+                  ? `Over ${shortName(r.spender)}’s ${money(limit, m)} limit`
+                  : `${shortName(r.spender)} can’t pay alone`,
               history: h
-                ? `${shortName(r.payee)} was paid ${h.count === 1 ? "once" : `${h.count} times`} here, ${money(h.total, m)} in all.`
-                : `First payment to ${shortName(r.payee)} from this budget.`,
+                ? `${h.count === 1 ? "Once" : `${h.count} times`} · ${money(h.total, m)}`
+                : "First payment",
               ...(task ? { task: { id: task[0], title: task[1].title, lead: task[1].lead } } : {}),
             });
           }),
@@ -116,8 +117,6 @@ export default async function ApprovalsPage() {
         decimals: m.decimals,
         ceiling: money(b.raise_ceiling, m),
         left: money(b.available, m),
-        held: money(b.committed, m),
-        sending: BigInt(b.in_flight) > 0n ? money(b.in_flight, m) : null,
         pending: b.pending_requests.flatMap((rid) => {
           const r = requests.get(rid);
           return r
