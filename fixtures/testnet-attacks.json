@@ -1,0 +1,63 @@
+{
+  "network": "testnet",
+  "contract": "budgets.earmark.testnet",
+  "at": "2026-11-13T09:39:31.467Z",
+  "attacks": [
+    {
+      "step": "unlisted-payee",
+      "label": "Pay an account that isn't an approved payee",
+      "expect": "payee_not_allowed",
+      "tx": "HaWux6gArYwq27KTC375hhD7FCYSAjN3Zxv2nP6ZbN1r",
+      "signer": "maya.earmark.testnet"
+    },
+    {
+      "step": "same-work",
+      "label": "Pay the same person for work already paid",
+      "expect": "duplicate_work",
+      "tx": "CPz9rZPqfriFN4UrNNurfLwzeH9CM5PDvgjAPFxsugLj",
+      "signer": "maya.earmark.testnet"
+    },
+    {
+      "step": "same-request-id",
+      "label": "Send a payment again with a used request id",
+      "expect": "duplicate_request",
+      "tx": "F4Lm4ZBM4z4DdLEa5D5QcphKtLjyEBsBjMxrWj1JRMgZ",
+      "signer": "maya.earmark.testnet"
+    },
+    {
+      "step": "period-cap",
+      "label": "Spend past the lead's cap for this period",
+      "expect": "over_period_cap",
+      "tx": "D7bDxJiR6mSQYZmJ599tVidJYsTzMm6ThWGVvD25e7p8",
+      "signer": "maya.earmark.testnet"
+    },
+    {
+      "step": "lead-approves",
+      "label": "The lead approves a payment (only approvers can)",
+      "expect": "not_approver",
+      "tx": "8CJGaZc5JYemjgiPE7T57saARzDiNHTFQzteRLdBmSwu",
+      "signer": "maya.earmark.testnet"
+    },
+    {
+      "step": "create-budget",
+      "label": "Create a budget without a DAO vote",
+      "expect": "not_dao",
+      "tx": "AqK9zyNJZsUNj5rQ7VttFG71D1oqwEHdLaBEobeqHS5Z",
+      "signer": "maya.earmark.testnet"
+    },
+    {
+      "step": "close-budget",
+      "label": "Close a budget and take its money without a DAO vote",
+      "expect": "not_dao",
+      "tx": "5DuV3aWWqv1y2fTAUwcSuMT5k3qgRJsxFGMva33fvAvD",
+      "signer": "maya.earmark.testnet"
+    },
+    {
+      "step": "replayed-delegate",
+      "label": "Replay a signed fee-free call",
+      "expect": "DelegateActionInvalidNonce",
+      "tx": "H9UGJFgRkWbGQ9YViGzEMCKXr3f6Zha2QETjGqYekFJP",
+      "signer": "gas.earmark.testnet"
+    }
+  ]
+}
