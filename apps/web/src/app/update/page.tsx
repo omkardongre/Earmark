@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CodeUpdate } from "@/components/code-update";
+import { DaoLock } from "@/components/dao-lock";
 
 export const metadata: Metadata = { title: "Update the contract · Earmark" };
 
@@ -12,6 +13,7 @@ export default function UpdatePage() {
         <p className="text-lg text-muted">Only your DAO can change Earmark’s code, by vote.</p>
       </div>
       <CodeUpdate />
+      <DaoLock />
     </div>
   );
 }

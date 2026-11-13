@@ -102,7 +102,7 @@ export function CodeUpdate() {
             "add_proposal",
             {
               proposal: {
-                description: `* Title: Update Earmark contract ${CONTRACT} <br>* Notes: code ${hash}`,
+                description: `* Title: Install new Earmark code on ${CONTRACT} <br>* Notes: Replaces the contract's code with build ${hash}. Budgets, payments and records stay as they are. Check the build on Earmark's Verify page before voting.`,
                 kind: upgradeKind(CONTRACT, hash),
               },
             },

@@ -26,7 +26,8 @@ export type KindLabel =
   | "transfer"
   | "add_member_to_role"
   | "policy_add_or_update_role"
-  | "upgrade_remote";
+  | "upgrade_remote"
+  | "factory_info_update";
 
 export const getPolicy = (dao: string) => view<DaoPolicy>(dao, "get_policy");
 
@@ -205,6 +206,11 @@ export function escalationFix(policy: DaoPolicy, contract: string) {
 /** The DAO replaces the contract's code with a stored blob; the contract's `upgrade` runs `migrate`. */
 export const upgradeKind = (contract: string, hash: string) => ({
   UpgradeRemote: { receiver_id: contract, method_name: "upgrade", hash },
+});
+
+/** Stops the DAO's factory from installing new DAO code without a vote (`auto_update: false`). */
+export const factoryLockKind = (factoryId: string) => ({
+  FactoryInfoUpdate: { factory_info: { factory_id: factoryId, auto_update: false } },
 });
 
 /** Sputnik's status for a proposal that ran: `Approved`; `InProgress` while voting. */
