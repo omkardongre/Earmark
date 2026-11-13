@@ -75,6 +75,51 @@ details[open] > summary .chev {
   }
 }
 
+/* Landing and Replay: a brand gradient on one key phrase, a faint dot grid behind the hero, and
+   a short rise-in for the first view. */
+.text-gradient {
+  background: linear-gradient(100deg, #4f46e5 10%, #7c3aed 50%, #059669 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.text-gradient-light {
+  background: linear-gradient(100deg, #a5b4fc 0%, #c4b5fd 45%, #6ee7b7 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.dot-grid {
+  background-image: radial-gradient(rgb(15 23 42 / 9%) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 60% 70% at 40% 30%, black 20%, transparent 75%);
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+.rise {
+  animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@keyframes live-ping {
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+.live-ping {
+  animation: live-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .live-ping {
+    animation: none;
+  }
+}
+
 /* Receipts print on plain white (cards drop their shadow with `print:shadow-none`). */
 @media print {
   body {

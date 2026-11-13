@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PreviewData } from "@/app/api/preview/route";
 import { toBase, units } from "@/lib/format";
+import { CountUp } from "./animated-number";
 import { Button, Card, Disclosure, Pill, Skeleton } from "./ui";
 
 type Path = "auto" | "one" | "dao" | "duplicate";
@@ -13,11 +14,30 @@ const PATHS: {
   label: string;
   tone: "green" | "amber" | "blue" | "red";
   hint: string;
+  bar: string;
 }[] = [
-  { key: "auto", label: "Paid at once", tone: "green", hint: "within the limit" },
-  { key: "one", label: "One approval", tone: "amber", hint: "one approver signs" },
-  { key: "dao", label: "DAO vote", tone: "blue", hint: "the council votes" },
-  { key: "duplicate", label: "Blocked", tone: "red", hint: "work already paid" },
+  {
+    key: "auto",
+    label: "Paid at once",
+    tone: "green",
+    hint: "within the limit",
+    bar: "bg-emerald-400",
+  },
+  {
+    key: "one",
+    label: "One approval",
+    tone: "amber",
+    hint: "one approver signs",
+    bar: "bg-amber-400",
+  },
+  { key: "dao", label: "DAO vote", tone: "blue", hint: "the council votes", bar: "bg-sky-400" },
+  {
+    key: "duplicate",
+    label: "Blocked",
+    tone: "red",
+    hint: "work already paid",
+    bar: "bg-rose-400",
+  },
 ];
 
 const OUTCOMES: { key: Outcome; label: string }[] = [
@@ -36,7 +56,7 @@ const outcomeOf = (status: string): Outcome =>
         ? "expired"
         : "other";
 
-const PAGE = 10;
+const PAGE = 5;
 const n = (x: number) => x.toLocaleString("en-US");
 
 /** "nearweek-news-contribution.sputnik-dao.near" -> "Nearweek News Contribution". */
@@ -94,7 +114,7 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
   const oneBase = meta ? toBase(one, meta) : null;
   const rulesOk = autoBase !== null && oneBase !== null && BigInt(autoBase) <= BigInt(oneBase);
 
-  // Tokens the DAO actually paid out in, and typical amounts for the presets.
+  // Tokens the DAO actually paid out in.
   const usedTokens = useMemo(
     () =>
       data
@@ -104,24 +124,6 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
         : [],
     [data],
   );
-  const presets = useMemo(() => {
-    if (!data || !meta) return { auto: [], one: [] };
-    const amounts = data.transfers
-      .filter((t) => t[1] === token)
-      .map((t) => BigInt(t[2]))
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    if (amounts.length === 0) return { auto: [], one: [] };
-    const at = (q: number) =>
-      units(
-        amounts[Math.min(amounts.length - 1, Math.floor(q * amounts.length))] ?? 0n,
-        meta,
-      ).replaceAll(",", "");
-    // Usual payouts suit "paid at once"; the larger ones suit "one approval". Each amount shows
-    // under one field only, so a DAO that always pays the same shows it once.
-    const auto = [...new Set([at(0.5), at(0.9)])];
-    const one = [...new Set([at(0.9), at(0.99)])].filter((v) => !auto.includes(v));
-    return { auto, one };
-  }, [data, meta, token]);
 
   const result = useMemo(() => {
     if (!data || !meta || !rulesOk || autoBase === null || oneBase === null) return null;
@@ -160,15 +162,18 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
     };
   }, [data, meta, token, autoBase, oneBase, rulesOk]);
 
-  const input = "h-11.5 w-full min-w-0 bg-transparent px-3.5 outline-none tabular";
+  const input =
+    "h-12 w-full min-w-0 bg-transparent px-4 text-lg font-semibold outline-none tabular";
   const visible = result ? result.rows.filter((r) => filter === "all" || r.path === filter) : [];
+  const saved =
+    result && result.total > 0 ? ((result.total - result.count.dao) / result.total) * 100 : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Which DAO: NEARWEEK by default, another one on request. */}
       {editing || (!data && !loading) ? (
         <form
-          className="flex flex-col gap-2 sm:flex-row"
+          className="flex flex-col gap-2 rounded-2xl border border-line bg-white p-3 shadow-card sm:flex-row"
           onSubmit={(e) => {
             e.preventDefault();
             void load(dao);
@@ -193,19 +198,28 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
           )}
         </form>
       ) : data ? (
-        <p className="flex flex-wrap items-center gap-x-2 text-muted">
-          <span className="font-semibold text-ink">{daoName(data.dao)}</span>
-          <span>
-            · {n(data.total)} proposals · read {since(data.fetchedAt)}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-line bg-white px-4 py-3 shadow-card">
+          <span
+            aria-hidden
+            className="grid size-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 text-lg font-semibold text-white"
+          >
+            {daoName(data.dao).charAt(0)}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-semibold">{daoName(data.dao)}</span>
+            <span className="block text-sm text-muted">
+              <span className="tabular font-medium text-ink">{n(data.total)} proposals</span> · read
+              from NEAR {since(data.fetchedAt)}
+            </span>
           </span>
           <button
             type="button"
-            className="font-semibold text-brand hover:underline"
+            className="rounded-lg px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-soft"
             onClick={() => setEditing(true)}
           >
             Use another DAO
           </button>
-        </p>
+        </div>
       ) : null}
 
       {error && <p className="rounded-xl bg-rose-50 px-4 py-3 text-rose-700">{error}</p>}
@@ -215,33 +229,26 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
           <p className="text-muted">
             Reading every past proposal of the DAO. Big DAOs take up to a minute the first time.
           </p>
-          <div className="grid gap-4 sm:grid-cols-4">
-            {[0, 1, 2, 3].map((i) => (
-              <Card key={i} className="space-y-3 p-5">
-                <Skeleton className="h-5 w-20" />
-                <Skeleton className="h-8 w-16" />
-              </Card>
-            ))}
-          </div>
+          <Skeleton className="h-56 w-full rounded-3xl!" />
         </div>
       )}
 
       {data && meta && (
-        <Card className="grid gap-5 p-5 sm:grid-cols-2">
+        <Card className="grid gap-x-5 gap-y-3 rounded-3xl! p-5 sm:grid-cols-2">
           <LimitInput
             label="Paid at once up to"
+            dot="bg-emerald-500"
             value={auto}
             onChange={setAuto}
             unit={meta.symbol}
-            presets={presets.auto}
             className={input}
           />
           <LimitInput
             label="One approval up to"
+            dot="bg-amber-400"
             value={one}
             onChange={setOne}
             unit={meta.symbol}
-            presets={presets.one}
             className={input}
           />
           {usedTokens.length > 1 && (
@@ -260,6 +267,9 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
               </select>
             </label>
           )}
+          <p className="text-sm text-muted sm:col-span-2">
+            Anything above {one || "the second limit"} {meta.symbol} goes to a council vote.
+          </p>
           {!rulesOk && (
             <p className="text-rose-700 sm:col-span-2">
               Use amounts, with the first limit no higher than the second.
@@ -269,33 +279,64 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
       )}
 
       {data && meta && result && (
-        <div className="space-y-6">
-          <div className="space-y-1">
-            <p className="text-2xl font-semibold tracking-tight">
-              Your council would vote on {n(result.count.dao)} of {n(result.total)} payouts.
-            </p>
-            <p className="text-muted">
-              {n(result.count.auto)} would be paid at once and {n(result.count.one)} would need one
-              approval. This shows which way each payout would go, not which ones deserved payment.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {PATHS.map((p) => (
-              <Card key={p.key} className="space-y-2 p-5">
-                <Pill tone={p.tone}>{p.label}</Pill>
-                <p className="tabular text-3xl font-bold tracking-tight">
-                  {n(result.count[p.key])}
+        <div className="space-y-8">
+          <section className="relative overflow-hidden rounded-3xl bg-ink p-6 text-white shadow-card sm:p-8">
+            <div
+              aria-hidden
+              className="absolute -right-24 -top-28 size-80 rounded-full bg-indigo-500/30 blur-3xl"
+            />
+            <div className="relative flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-indigo-200">Your council would vote on</p>
+                <p className="mt-2 flex flex-wrap items-baseline gap-x-3 font-semibold tracking-[-0.03em]">
+                  <span className="text-gradient-light text-6xl sm:text-7xl">
+                    <CountUp value={result.count.dao} />
+                  </span>
+                  <span className="text-xl text-white/70">
+                    of <span className="tabular">{n(result.total)}</span> payouts
+                  </span>
                 </p>
-                <p className="text-sm text-muted">{p.hint}</p>
-              </Card>
-            ))}
-          </div>
+              </div>
+              {result.total > 0 && (
+                <span className="tabular rounded-full bg-emerald-400/15 px-3.5 py-1.5 text-sm font-semibold text-emerald-300 ring-1 ring-emerald-300/25">
+                  {saved >= 99.95 ? "100" : saved.toFixed(1)}% fewer votes
+                </span>
+              )}
+            </div>
+
+            {/* One bar, split by path: nearly all of it green is the point. */}
+            <div className="relative mt-7 flex h-3 gap-0.5 overflow-hidden rounded-full bg-white/10">
+              {PATHS.map((p) =>
+                result.count[p.key] > 0 ? (
+                  <span
+                    key={p.key}
+                    className={`${p.bar} h-full transition-[flex-grow] duration-500`}
+                    style={{ flexGrow: Math.max(result.count[p.key], result.total * 0.006) }}
+                  />
+                ) : null,
+              )}
+            </div>
+
+            <dl className="relative mt-6 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
+              {PATHS.map((p) => (
+                <div key={p.key}>
+                  <dt className="flex items-center gap-2 text-sm text-white/70">
+                    <span className={`size-2 rounded-full ${p.bar}`} aria-hidden />
+                    {p.label}
+                  </dt>
+                  <dd className="mt-1 text-3xl font-semibold tracking-tight">
+                    <CountUp value={result.count[p.key]} />
+                  </dd>
+                  <dd className="text-sm text-white/50">{p.hint}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
 
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold tracking-tight">Payouts</h2>
-              <fieldset className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-xl font-semibold tracking-tight">Every payout</h2>
+              <fieldset className="flex flex-wrap gap-1 rounded-full bg-slate-100 p-1">
                 <legend className="sr-only">Filter payouts</legend>
                 {[{ key: "all" as const, label: "All" }, ...PATHS].map((f) => (
                   <button
@@ -306,10 +347,8 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
                       setFilter(f.key);
                       setShown(PAGE);
                     }}
-                    className={`rounded-full px-3.5 py-1.5 text-sm font-medium ring-1 ring-inset ${
-                      filter === f.key
-                        ? "bg-ink text-white ring-ink"
-                        : "bg-white text-muted ring-line hover:text-ink"
+                    className={`rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
+                      filter === f.key ? "bg-white text-ink shadow-sm" : "text-muted hover:text-ink"
                     }`}
                   >
                     {f.label}
@@ -317,7 +356,7 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
                 ))}
               </fieldset>
             </div>
-            <Card>
+            <Card className="overflow-hidden rounded-3xl!">
               {visible.length === 0 ? (
                 <p className="px-5 py-8 text-center text-muted">None.</p>
               ) : (
@@ -327,9 +366,15 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
                     return (
                       <li
                         key={r.id}
-                        className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 px-5 py-3"
+                        className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-slate-50/70"
                       >
-                        <span className="min-w-0">
+                        <span
+                          aria-hidden
+                          className="grid size-9 shrink-0 place-items-center rounded-full bg-slate-100 text-sm font-semibold uppercase text-slate-600"
+                        >
+                          {r.receiver.charAt(0)}
+                        </span>
+                        <span className="min-w-0 flex-1">
                           <span className="block truncate font-medium">{r.receiver}</span>
                           <span className="block text-sm text-muted">
                             #{r.id} · {councilDid(r.status)}
@@ -407,24 +452,28 @@ export function RulePreview({ defaultDao }: { defaultDao: string }) {
 
 function LimitInput({
   label,
+  dot,
   value,
   onChange,
   unit,
-  presets,
   className,
 }: {
   label: string;
+  /** The path's colour, matching the result bar. */
+  dot: string;
   value: string;
   onChange: (v: string) => void;
   unit: string;
-  presets: string[];
   className: string;
 }) {
   return (
-    <div className="space-y-2">
+    <div>
       <label className="block space-y-1.5">
-        <span className="font-medium">{label}</span>
-        <span className="flex items-center rounded-xl border border-slate-300 bg-white focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/20">
+        <span className="flex items-center gap-2 font-medium">
+          <span className={`size-2 rounded-full ${dot}`} aria-hidden />
+          {label}
+        </span>
+        <span className="flex items-center rounded-2xl border border-slate-300 bg-white focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/20">
           <input
             className={className}
             inputMode="decimal"
@@ -434,23 +483,6 @@ function LimitInput({
           <span className="pr-3.5 font-medium text-muted">{unit}</span>
         </span>
       </label>
-      {presets.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted">
-          <span>Typical payout:</span>
-          {presets.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => onChange(p)}
-              className={`tabular rounded-full px-2.5 py-0.5 ring-1 ring-inset ${
-                value === p ? "bg-brand-soft text-brand ring-brand/30" : "ring-line hover:text-ink"
-              }`}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

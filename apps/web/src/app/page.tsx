@@ -3,10 +3,11 @@ import { ActivityList } from "@/components/activity-list";
 import { BudgetCard } from "@/components/budget-card";
 import { Landing } from "@/components/landing";
 import { type ActiveTask, NeedsYou, NewBudgetLink } from "@/components/role-views";
-import { SignedOut } from "@/components/signed-out";
+import { SignedIn, SignedOut } from "@/components/signed-out";
 import { Empty, Section } from "@/components/ui";
 import { getPolicy, groupProposers } from "@/lib/dao";
 import { loadActivity, loadBase, paidByPayee } from "@/lib/data";
+import { display } from "@/lib/fonts";
 import { money, TASK_SYSTEM_REASON } from "@/lib/format";
 import { listRequests, listTasks } from "@/lib/near";
 
@@ -49,9 +50,9 @@ export default async function Home() {
     );
   });
   return (
-    <div className="space-y-10">
+    <div className={`${display.className} space-y-10`}>
       <SignedOut>
-        <Landing requests={requests} meta={meta.values().next().value} />
+        <Landing requests={requests} />
       </SignedOut>
       <NeedsYou
         tasks={active}
@@ -105,14 +106,17 @@ export default async function Home() {
           ))}
         </p>
       )}
-      <Section title="Recent activity">
-        <ActivityList
-          first={activity}
-          skipChanges
-          pageSize={5}
-          empty="Nothing yet. Make the first payment above."
-        />
-      </Section>
+      {/* The team's own log: visitors get the landing instead. */}
+      <SignedIn>
+        <Section title="Recent activity">
+          <ActivityList
+            first={activity}
+            skipChanges
+            pageSize={5}
+            empty="Nothing yet. Make the first payment above."
+          />
+        </Section>
+      </SignedIn>
     </div>
   );
 }

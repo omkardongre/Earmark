@@ -53,3 +53,36 @@ export function AnimatedNumber({ value, meta }: { value: string; meta: TokenMeta
     </span>
   );
 }
+
+/**
+ * A whole number that counts up from 0 on first view, then to each new value (the Replay page's
+ * counts when a limit changes). No motion with prefers-reduced-motion.
+ */
+export function CountUp({ value }: { value: number }) {
+  const [shown, setShown] = useState(0);
+  const from = useRef(0);
+
+  useEffect(() => {
+    const a = from.current;
+    from.current = value;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches || document.hidden;
+    if (still || a === value) return setShown(value);
+    const start = performance.now();
+    const ms = a === 0 ? 1100 : MS;
+    let raf = 0;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / ms);
+      setShown(Math.round(a + (value - a) * easeOut(t)));
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+
+  return (
+    <span className="tabular">
+      <span aria-hidden>{shown.toLocaleString("en-US")}</span>
+      <span className="sr-only">{value.toLocaleString("en-US")}</span>
+    </span>
+  );
+}

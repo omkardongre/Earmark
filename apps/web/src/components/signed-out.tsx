@@ -8,3 +8,9 @@ export function SignedOut({ children }: { children: ReactNode }) {
   const { accountId } = useWallet();
   return accountId ? null : children;
 }
+
+/** Shows its children only to signed-in people (the team's own activity log). */
+export function SignedIn({ children }: { children: ReactNode }) {
+  const { accountId } = useWallet();
+  return accountId ? children : null;
+}

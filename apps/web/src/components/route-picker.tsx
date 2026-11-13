@@ -5,7 +5,7 @@ import { CONTRACT, NETWORK } from "@/lib/config";
 import { BLOCKED, shortName, toBase } from "@/lib/format";
 import { view } from "@/lib/near";
 import type { BlockReason, Tier, TokenMeta } from "@/lib/types";
-import { Card, Pill, type Tone } from "./ui";
+import { Pill, type Tone } from "./ui";
 
 type Check = { tier: Tier | null; blocked: BlockReason | null };
 
@@ -25,6 +25,12 @@ const TIER: Record<Tier, { label: string; hint: string; tone: Tone }> = {
     hint: "A trusted contributor: no approval needed up to the budget’s trusted limit.",
     tone: "green",
   },
+};
+
+const RESULT_BG: Partial<Record<Tone, string>> = {
+  green: "bg-emerald-50/70",
+  amber: "bg-amber-50/70",
+  blue: "bg-sky-50/70",
 };
 
 /** Plainer words for a visitor than the lead-facing `BLOCKED` text. */
@@ -91,16 +97,25 @@ export function RoutePicker({
   const choices = [...payees.slice(0, 4), SOMEONE];
 
   return (
-    <Card className="space-y-4 p-5">
-      <div>
-        <p className="font-semibold">What happens to a payment?</p>
-        <p className="text-sm text-muted">On the demo budget, checked by the live contract.</p>
+    <div className="space-y-4 rounded-3xl border border-line bg-white p-6 shadow-card">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold">What happens to a payment?</p>
+          <p className="text-sm text-muted">Asked to the live contract.</p>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+          <span className="relative flex size-1.5">
+            <span className="live-ping absolute inline-flex size-full rounded-full bg-emerald-500" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+          </span>
+          Live
+        </span>
       </div>
 
-      <label className="flex items-baseline gap-2 rounded-xl bg-surface px-4 py-3 focus-within:ring-2 focus-within:ring-brand/30">
+      <label className="flex items-baseline gap-2 rounded-2xl bg-surface px-4 py-3.5 ring-1 ring-line focus-within:ring-2 focus-within:ring-brand/40">
         <span className="sr-only">Amount</span>
         <input
-          className="tabular w-full min-w-0 bg-transparent text-2xl font-bold tracking-tight outline-none placeholder:text-slate-300"
+          className="tabular w-full min-w-0 bg-transparent text-3xl font-semibold tracking-tight outline-none placeholder:text-slate-300"
           inputMode="decimal"
           placeholder="0"
           value={amount}
@@ -129,20 +144,25 @@ export function RoutePicker({
         ))}
       </fieldset>
 
-      <div className="min-h-12 border-t border-line pt-3.5" aria-live="polite">
+      <div
+        className={`min-h-16 rounded-2xl px-4 py-3 transition-colors ${
+          check?.blocked ? "bg-rose-50" : tier ? RESULT_BG[tier.tone] : "bg-surface"
+        }`}
+        aria-live="polite"
+      >
         {!base ? (
           <p className="text-sm text-muted">Enter an amount.</p>
         ) : failed ? (
           <p className="text-sm text-muted">Couldn’t reach the contract. Try again in a moment.</p>
         ) : check?.blocked ? (
-          <p className="flex items-start gap-2">
+          <p className="flex flex-col items-start gap-1.5">
             <Pill tone="red">Blocked</Pill>
             <span className="text-[15px] text-muted">
               {WHY[check.blocked] ?? BLOCKED[check.blocked]}
             </span>
           </p>
         ) : tier ? (
-          <p className="flex items-start gap-2">
+          <p className="flex flex-col items-start gap-1.5">
             <Pill tone={tier.tone}>{tier.label}</Pill>
             <span className="text-[15px] text-muted">{tier.hint}</span>
           </p>
@@ -150,6 +170,6 @@ export function RoutePicker({
           <p className="text-sm text-muted">Checking…</p>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
