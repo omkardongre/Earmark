@@ -1,4 +1,4 @@
-.PHONY: install build test test-sandbox lint fmt verify demo web web-build deploy deploy-mainnet alerts-setup relayer-account relay-smoke relay-ask try-refill try-scenes try-limits
+.PHONY: install build test test-sandbox lint fmt verify trezu-check judge-check attacks demo web web-build deploy deploy-mainnet alerts-setup relayer-account relay-smoke relay-ask try-refill try-scenes try-limits
 
 # The sandbox node needs glibc >= 2.38; this image has it on any host with Docker.
 SANDBOX_IMAGE ?= rust:1.97.1-trixie
@@ -31,8 +31,22 @@ fmt:
 	pnpm format
 
 # Keyless checks of the live testnet deployment (public RPC reads only).
+# make verify (testnet) or make verify NET=mainnet. PASS / FAIL / WARN per check; exit = failures.
 verify:
-	$(TSX) scripts/verify/verify.ts
+	$(TSX) scripts/verify/verify.ts --network $(or $(NET),testnet)
+
+# Validates the Trezu forms in trezu/ with Trezu's own validator and the contract's argument shapes.
+trezu-check:
+	$(TSX) scripts/trezu/check.ts
+
+# Every label JUDGE.md tells a judge to press must still exist in the app.
+judge-check:
+	$(TSX) scripts/judge/check.ts
+
+# Sends calls that must be refused on the testnet demo budget and records each refused tx in
+# fixtures/testnet-attacks.json, which make verify re-reads (needs maya's key; no money moves).
+attacks:
+	$(TSX) scripts/testnet/attacks.ts
 
 # Replays the recorded testnet demo from fixtures/ (no keys, no network).
 demo:

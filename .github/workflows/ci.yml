@@ -49,3 +49,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm --dir apps/web test
+      - name: Trezu forms
+        run: scripts/node_modules/.bin/tsx scripts/trezu/check.ts
+      - name: Judge guide labels
+        run: scripts/node_modules/.bin/tsx scripts/judge/check.ts

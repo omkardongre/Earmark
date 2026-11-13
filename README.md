@@ -1,12 +1,14 @@
 # Earmark
 
-[![CI](https://github.com/omkardongre/Earmark/actions/workflows/ci.yml/badge.svg)](https://github.com/omkardongre/Earmark/actions/workflows/ci.yml)
+[![CI](https://github.com/omkardongre/Earmark/actions/workflows/ci.yml/badge.svg)](https://github.com/omkardongre/Earmark/actions/workflows/ci.yml) [![Live checks](https://github.com/omkardongre/Earmark/actions/workflows/live.yml/badge.svg)](https://github.com/omkardongre/Earmark/actions/workflows/live.yml)
 
 Earmark gives teams in a Sputnik DAO (including Trezu-made treasuries) their own budgets, enforced by a NEAR contract with no keys.
 
 - **Track:** Social Money (`social`), NEAR HACKATHON.
-- **Hosted app (testnet):** https://earmark-878141445235.us-central1.run.app
-- **Network:** testnet only. Payouts are public on-chain.
+- **For judges:** [`JUDGE.md`](JUDGE.md): a 3-minute walkthrough, one command (`make verify NET=mainnet`) and what we don't claim.
+- **Mainnet:** https://earmark-mainnet-878141445235.us-central1.run.app. Contract `budgets.omkar5.near` (0 keys), owned by the Trezu treasury `earmark.sputnik-dao.near`, native USDC. Budgets, the three payment paths, the "ask to be paid" link and receipts.
+- **Testnet:** https://earmark-878141445235.us-central1.run.app. Everything above plus tasks (bounties), near.com payouts, Telegram alerts and fees paid by Earmark. Mainnet gets these in one DAO-voted upgrade.
+- **Payouts are public on-chain.** Every check below is a keyless public read; the same checks run every 6 hours in CI.
 - **Machine-readable summary:** [`llms.txt`](llms.txt)
 
 ## The problem
@@ -43,8 +45,8 @@ No wallet needed for any of these steps.
 | Open [`/preview`](https://earmark-878141445235.us-central1.run.app/preview) ("Replay") | NEARWEEK's 14,171 real proposals replayed against two limits you set. The "Blocked" tile shows 121; "How we counted" shows 23 of them approved by the council |
 | Open [`/budgets/0`](https://earmark-878141445235.us-central1.run.app/budgets/0) ("News contributors") | Available, waiting for approval and paid out, and every payment with its transaction. The 120 tUSDC payment to Sofia went to a DAO vote and shows "Paid by DAO"; its payment page links "Proposal #4" (on testnet this opens the DAO on NearBlocks, since Trezu has no testnet) |
 | Open [`/people`](https://earmark-878141445235.us-central1.run.app/people) | Each contributor's paid count and total, each lead's record, limit and raise eligibility, and the council. Every number comes from a contract view |
-| Open [`/verify`](https://earmark-878141445235.us-central1.run.app/verify) ("Check it yourself") | Live, keyless checks: 0 access keys, the code hash matches the recorded build, code changes only by DAO vote, the DAO is the owner, balances add up, ready for new payments. Each row has a "Proof" link to NearBlocks and the raw RPC answer |
-| Run `make verify` | The same checks from a terminal, one PASS or FAIL line per check. No keys, no `.env` |
+| Open [`/verify`](https://earmark-878141445235.us-central1.run.app/verify) ("Check it yourself") | Live, keyless checks: 0 access keys, the code hash matches the recorded build, code changes only by DAO vote, the DAO is the owner, the DAO runs the code its factory published and whether that factory can still update it, how many members a DAO vote needs, balances add up, ready for new payments. Each row has a "Proof" link to NearBlocks and the raw RPC answer. A row that is true but worth knowing (one person can pass votes alone) is amber, not a failure |
+| Run `make verify` / `make verify NET=mainnet` | The same checks from a terminal, one PASS, FAIL or WARN line per check, then every recorded transaction re-read on chain (14 on mainnet; on testnet the 19 demo steps and 8 refused attacks). Exit code = failed checks. No keys, no `.env` |
 | Run `make demo` | Replay of the recorded testnet demo (19 steps): payouts at once, one approval, a DAO vote paid by the DAO, and refusals (`payee_not_allowed`, `duplicate_work`, `duplicate_request`, `not_spender`), each with its tx link. No network |
 | Run `make test` | Contract unit tests, including the invariants table below |
 
@@ -138,6 +140,8 @@ Not yet tested, or only partly:
 - **A lead and an approver who collude are not stopped.** They can pay an approved payee up to the one-approval limit and the period cap. Payee allowlists, caps and public records limit the damage; they don't prevent it.
 - **Payouts are public.** Every payee, amount and work link is on-chain. There is no confidential mode.
 - **No audit.** The contract has unit and sandbox tests only.
+- **The mainnet treasury is a 1-of-1 demo.** One member (`omkar5.near`) can pass every vote, so the DAO-vote tier protects nothing there yet. `/verify` and each budget page say so; a real team should need 2 of 3. The testnet DAO needs 2 of 3.
+- **The DAO's factory can update the DAO's code.** Sputnik DAOs start with `auto_update` on, and the DAO's code (v3.2) installs a factory update without a vote. One DAO vote (`FactoryInfoUpdate`, from the app's `/update` page) turns it off; `make verify` warns until then.
 - **Trezu-shaped DAOs let a Requestor remove proposals.** In the policy Trezu gives new treasuries, a Requestor can remove pending proposals, including Earmark's escalations. `settle_escalation` then records the escalation as closed and frees the lead's slot. Removing a proposal after the DAO's money arrived changes nothing: the request is no longer `escalated`, so its work stays claimed.
 - **DAO payouts need the payee registered with the token.** If not, Earmark keeps the DAO's money for that request (`dao_funded`) until a retry pays it, or the DAO takes it back with `return_escalation`.
 - **Mainnet is one small run.** `budgets.omkar5.near` holds a 1 USDC budget for the Trezu treasury `earmark.sputnik-dao.near`; its setup, funding and DAO-vote payment all showed in Trezu as normal requests. Amounts are tiny (1 USDC budget).
@@ -179,7 +183,6 @@ Not done:
 
 - Confidential (NEAR Business / NEAR Intents) treasuries: not tried. Mainnet used a public Trezu treasury.
 - Audit.
-- Wallet tests of payee registration and add payee.
 - No live customer yet.
 
 ---
@@ -195,7 +198,10 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 | `make test` | Contract unit tests |
 | `make test-sandbox` | Integration tests on a local NEAR node (Docker) |
 | `make lint` | rustfmt, clippy, biome |
-| `make verify` | Check the live testnet deployment (no keys, no `.env`; tx lookups use archival RPC) |
+| `make verify` | Check the live testnet deployment (no keys, no `.env`; tx lookups use archival RPC). `NET=mainnet` for mainnet |
+| `make attacks` | Send 8 calls that must be refused on the testnet demo budget and record them in `fixtures/testnet-attacks.json` (needs maya's testnet key; no money moves) |
+| `make trezu-check` | Validate the [Trezu forms](trezu/) with Trezu's own validator and the contract's argument shapes |
+| `make judge-check` | Every label `JUDGE.md` tells a judge to press still exists in the app |
 | `make demo` | Replay the recorded testnet demo with tx links (no network) |
 | `make web` | Web app on http://localhost:3000, reading the testnet demo |
 | `make web-build` | Production build of the web app |
@@ -213,8 +219,9 @@ Requirements: Rust (toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.t
 | [`contracts/test-token`](contracts/test-token) | NEP-141 test stablecoin for testnet and sandbox (owner can mint) |
 | [`apps/web`](apps/web) | Web app (Next.js 16); see [Web app](#web-app) |
 | [`scripts`](scripts) | Node scripts for verification and the demo |
-| [`scripts/verify`](scripts/verify), [`scripts/demo`](scripts/demo) | `make verify`, `make demo`; both read [`fixtures/testnet-demo.json`](fixtures/testnet-demo.json) |
-| [`fixtures`](fixtures) | Every transaction of the recorded testnet demo, with its expected outcome |
+| [`scripts/verify`](scripts/verify), [`scripts/demo`](scripts/demo) | `make verify`, `make demo`; they read [`fixtures/testnet-demo.json`](fixtures/testnet-demo.json), [`fixtures/mainnet.json`](fixtures/mainnet.json) and [`fixtures/testnet-attacks.json`](fixtures/testnet-attacks.json) |
+| [`fixtures`](fixtures) | Every recorded transaction (testnet demo, mainnet run, refused attacks) with its expected outcome and events |
+| [`trezu`](trezu) | Trezu custom request forms for each DAO action on a budget |
 | [`scripts/testnet`](scripts/testnet) | Testnet setup; see [Testnet scripts](#testnet-scripts) |
 
 ### Contract methods
@@ -302,15 +309,17 @@ Changes that loosen a rule (raise a limit, add a payee, unpause, ...) are queued
 Screens in [`apps/web`](apps/web):
 
 - **Landing** for signed-out visitors: one line, live counts per payment path with the latest of each, links to Try it and the replay, and a route picker (amount + payee → pays now / one approval / DAO vote / blocked, from the live `check_spend` view, no wallet).
+- **Votes saved**, under the landing's first screen: "13,896 votes → 20", NEARWEEK's closed history (2022–2024) with a 1 NEAR limit and one approval up to 5 NEAR, linked to `/preview`, which recomputes it live.
 - **Budgets home** with recent payments: one row per payment showing its latest step, 5 at a time, rule changes left out ("Show more" pages older history through `/api/activity`). People show by name ("Sofia Reyes" for `sofia-reyes.earmark.testnet`); the full account stays in links and the pay sheet.
 - **Ask to be paid** (`/budgets/<id>/request`, no wallet needed): a contributor picks who they are (preset when signed in as a payee), the amount, the work link and a note, and gets a link to send their lead (Copy or Share). The link opens the budget page with a "Writer asks to be paid 0.2 USDC" line and the pay form filled in once a lead signs in; the link leaves the address bar so a reload doesn't reopen it. Nothing is stored: the fields are only suggestions ([`lib/request-link.ts`](apps/web/src/lib/request-link.ts) drops a link whose payee isn't on the budget, whose amount isn't valid, or whose text is over the contract's 256-byte limit), the lead reviews them, and the contract checks every rule. Signed-in payees see an "Ask to be paid" button on the budget card.
 - **Tasks** (`/budgets/<id>/tasks`, `/tasks/new`, `/tasks/<n>`): the board (Open, In progress, Paid) and a task page with one main action for whoever is signed in: "Take this task", "Send the work", "Accept and pay" (with the tier from `check_accept`), "Send back to fix" (rejecting as not acceptable is a separate red link with a confirm), "Cancel task", "See the receipt". The task page reloads the task itself after each action, and checks a work link with `check_spend` before the wallet opens, so an already-paid link is refused without a fee. Screens follow the signed-in person's role in the budget: home shows "Needs you" (work to review, work to send or fix, payments to approve) and "N tasks you can take"; a contributor's budget page shows only tasks, their own payments and "You earned X here". The budget page lists active tasks; a person's page shows "Trusted up to X" per budget. On a contract without tasks the views fail with `MethodNotFound` and the app says tasks aren't available instead of failing.
 - **Receipt**: a paid payment's page has "Download receipt", which opens the browser's print dialog ("Save as PDF"). The print view drops the nav and buttons and adds a "Payment receipt" title, the payout transaction hash and link, and the receipt id. No PDF library or server rendering.
-- **Budget page**: payments table with filters and `list_requests` paging; animated budget numbers (still with reduced motion); CSV export (`/api/export/<id>`: UTC date, request id, payee, exact amount, token, status, work link, tx; cells starting with `= + - @` are quoted against formula injection).
+- **Budget page**: "How payments work" also says how many DAO members a large payout needs, read from the DAO's policy (`lib/governance.ts`, Sputnik's own count), and says so when one member decides alone.
+- **Budget page** (more): payments table with filters and `list_requests` paging; animated budget numbers (still with reduced motion); CSV export (`/api/export/<id>`: UTC date, request id, payee, exact amount, token, status, work link, tx; cells starting with `= + - @` are quoted against formula injection).
 - **Payment page** `/payments/[id]`: steps, each with its transaction.
 - **Payment sheet**: the tier shown before you send; a payee registration check (NEP-145 `storage_balance_of`; one-click `storage_deposit` with the deposit read from `storage_balance_bounds`), also used when an approver adds a payee.
 - **Approvals**, shown only to approvers: approve, reject, "Recently decided" with when, and folded controls for waiting changes, pause with a confirm step, raise (a small sheet: new amount with the max and the wait shown, one "Raise to …" button), and payees. A change queued here (raise, unpause) shows with its Cancel button at once, before the server list catches up; every toast says "Network fee paid by Earmark" when the relay paid. "Add" a payee in one step: if the token doesn't know them yet, the same click pays their registration first (the wallet asks twice); the new payee shows in the list with its countdown and a "Make payable" button. The nav badge reloads its count (`/api/queue`) after each action.
-- **People** `/people` and person pages: contributor and lead records from the contract.
+- **People** `/people` and person pages: contributor and lead records from the contract. A record page with paid work has "Share record" (the phone's share sheet, or copy the link) and a share preview image (`opengraph-image.tsx`: name and paid work).
 - **Try it** `/try`, **Replay** `/preview` (replays a mainnet Sputnik DAO's payout history against draft limits), **Check it yourself** `/verify` and **Set up a budget** `/setup` (sections below).
 
 How it reads and writes:
@@ -328,6 +337,8 @@ Live, keyless checks of `budgets.earmark.testnet`, the browser version of `make 
 - The code hash matches the recorded reproducible build, and `contract_source_metadata` names the commit and the pinned Docker image. The current hash is shown on the page and printed by `make verify`.
 - Code changes only by DAO `UpgradeRemote` votes: the contract deployed itself once, then deleted its key.
 - The DAO is the owner.
+- The DAO's own rules stay in its hands: it runs the Sputnik code its factory publishes (DAO `view_account`, factory `get_contracts_metadata`), and `get_factory_info` says whether the factory can still update that code without a vote. Amber while `auto_update` is on, with a link to `/update`, whose "DAO code" card files and approves the `FactoryInfoUpdate` vote that turns it off.
+- How many members a DAO vote needs, for large payouts (`transfer`), budget changes (`call`) and new Earmark code (`upgrade_remote`), counted as Sputnik counts (`lib/governance.ts`, shared with `make verify`). Amber when one member can pass them alone.
 - Balances add up: token held ≥ budgets, balance = available + waiting + paying, paid requests = paid out.
 - Ready for new payments: the contract has at least 0.5 NEAR free for storage. If not, the row (and the Approvals page) says how much NEAR to send it; a lead only sees that payments are paused.
 
