@@ -10,8 +10,10 @@ import { TasksEmpty } from "@/components/task-board";
 import { ACTIVE, TaskList } from "@/components/task-list";
 import { TelegramAlerts } from "@/components/telegram-link";
 import { Disclosure, Person, Pill, Section } from "@/components/ui";
+import { getPolicy } from "@/lib/dao";
 import { loadActivity, loadBase, paidByPayee } from "@/lib/data";
-import { duration, money } from "@/lib/format";
+import { duration, money, shortName } from "@/lib/format";
+import { type Policy, ruleText, votesNeeded } from "@/lib/governance";
 import { listIntentsPayees } from "@/lib/intents";
 import { listRequests, listTasks } from "@/lib/near";
 import { readPrefill } from "@/lib/request-link";
@@ -32,13 +34,16 @@ export default async function BudgetPage({
   const b = base.budgets.find((x) => x.id === id);
   const m = base.meta.get(id);
   if (!b || !m) notFound();
-  const [first, activity, tasks, earned, nearCom] = await Promise.all([
+  const [first, activity, tasks, earned, nearCom, policy] = await Promise.all([
     listRequests(id, { limit: 10 }),
     loadActivity(base, { budget: id, skipPayments: true }),
     listTasks(id, { limit: 50 }),
     paidByPayee(b),
     listIntentsPayees(id),
+    getPolicy(base.config.dao_id).catch(() => null),
   ]);
+  // Who decides the large payouts: the DAO's own vote rule, read from its policy.
+  const daoVote = policy ? votesNeeded(policy as unknown as Policy, "transfer") : null;
   const team = { spenders: b.spenders.map(([a]) => a), approvers: b.approvers, payees: b.payees };
   // Contributors see their own side; the full record is for the team and the public.
   const notContributor = ["lead", "approver", "visitor"] as const;
@@ -76,7 +81,12 @@ export default async function BudgetPage({
                   Up to {money(b.one_approver_limit, m)}. Any approver other than the spender.
                 </Rule>
                 <Rule tone="blue" title="DAO vote">
-                  Anything larger becomes a normal DAO proposal.
+                  Anything larger becomes a normal DAO proposal
+                  {daoVote
+                    ? daoVote.needed === 1
+                      ? `. One member decides it (${shortName(daoVote.members[0] ?? "")}): fine for a demo, a real team should need 2 of 3.`
+                      : `, passed by ${ruleText(daoVote)} council members.`
+                    : "."}
                 </Rule>
                 <Rule tone="gray" title="Rule changes">
                   Loosening waits {duration(Number(base.config.loosen_delay_secs))} and can be

@@ -34,6 +34,18 @@ async function queries(check: string): Promise<object[] | null> {
         .catch(() => EXPECTED_DAO);
       return [call(dao, "get_proposals", { from_index: 0, limit: 100 })];
     }
+    case "dao":
+    case "votes": {
+      const dao = await getConfig()
+        .then((c) => c.dao_id)
+        .catch(() => EXPECTED_DAO);
+      return check === "dao"
+        ? [
+            { request_type: "view_account", finality: "final", account_id: dao },
+            call(dao, "get_factory_info"),
+          ]
+        : [call(dao, "get_policy")];
+    }
     case "balances": {
       const tokens = await getConfig()
         .then((c) => c.token_ids)

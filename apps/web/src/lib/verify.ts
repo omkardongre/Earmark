@@ -11,6 +11,7 @@ import {
   txUrl,
 } from "./config";
 import { money } from "./format";
+import { type FactoryInfo, moneyRules, type Policy, ruleText, type VoteRule } from "./governance";
 import {
   accessKeyList,
   contractTopUp,
@@ -26,9 +27,11 @@ import type { Budget, Config, SpendRequest } from "./types";
 
 export type Evidence = { label: string; href: string };
 export type CheckRow = {
-  id: "keys" | "code" | "upgrades" | "owner" | "balances" | "reserve";
+  id: "keys" | "code" | "upgrades" | "owner" | "dao" | "votes" | "balances" | "reserve";
   title: string;
   ok: boolean;
+  /** True but worth knowing (a choice the DAO made, e.g. one person can vote alone): not a failure. */
+  warn?: boolean;
   /** The chain couldn't be read (e.g. a rate limit): not a failure, just not checked. */
   unknown?: boolean;
   detail: string;
@@ -264,6 +267,71 @@ export async function runVerify(): Promise<VerifyReport> {
     };
   });
 
+  // Who controls the DAO that owns Earmark: whose code it runs, and how many members a vote needs.
+  const daoState = dao.then(async (d) => {
+    const [account, factory, policy] = await Promise.all([
+      tracked(viewAccount(d)),
+      tracked(viewRead<FactoryInfo>(d, "get_factory_info")),
+      tracked(viewRead<Policy>(d, "get_policy")),
+    ]);
+    return { d, account, factory, policy };
+  });
+
+  const daoCode = guard({ id: "dao", title: "The DAO’s own rules stay in its hands" }, async () => {
+    const { d, account, factory } = await daoState;
+    const code = account.global_contract_hash ?? account.code_hash;
+    const published = await tracked(
+      viewRead<[string, { version: number[] }][]>(factory.factory_id, "get_contracts_metadata"),
+    );
+    const match = published.find(([h]) => h === code);
+    const version = match ? `Sputnik v${match[1].version.join(".")}` : "unknown code";
+    const first = match
+      ? `${d} runs ${version}, the code its factory ${factory.factory_id} publishes.`
+      : `${d} runs code ${short(code)} that its factory ${factory.factory_id} doesn’t list.`;
+    return {
+      ok: Boolean(match) && !factory.auto_update,
+      warn: Boolean(match) && factory.auto_update,
+      detail: factory.auto_update
+        ? `${first} Its factory can still update the DAO’s code without a vote (auto-update is on). One DAO vote turns that off.`
+        : `${first} Auto-update is off, so only the DAO’s own vote can change its code.`,
+      evidence: [
+        ...(factory.auto_update ? [{ label: "Turn it off by vote", href: "/update" }] : []),
+        { label: "DAO on NearBlocks", href: accountUrl(d) },
+        rpcLink("dao"),
+      ],
+    };
+  });
+
+  const votes = guard({ id: "votes", title: "How many members a DAO vote needs" }, async () => {
+    const { d, policy } = await daoState;
+    const r = moneyRules(policy);
+    const rules = [
+      ["large payouts", r.payouts],
+      ["budget changes", r.calls],
+      ["new Earmark code", r.code],
+    ] as const;
+    const text = (rule: VoteRule | null) =>
+      rule ? `${ruleText(rule)} ${rule.of === 1 ? "member" : "members"}` : "no one";
+    const same = new Set(rules.map(([, x]) => (x ? text(x) : ""))).size === 1;
+    const solo = [...new Set(rules.flatMap(([, x]) => (x?.needed === 1 ? x.members : [])))].join(
+      ", ",
+    );
+    const first = same
+      ? `Every vote that moves money or changes code needs ${text(r.payouts)}.`
+      : `${rules.map(([what, x]) => `${what[0]?.toUpperCase()}${what.slice(1)}: ${text(x)}`).join(". ")}.`;
+    return {
+      ok: !r.alone,
+      warn: r.alone,
+      detail: r.alone
+        ? `${first} ${solo} can pass them alone: fine for a demo treasury, but a real team should need 2 of 3.`
+        : `${first} No one can pass them alone.`,
+      evidence: [
+        { label: "DAO on NearBlocks", href: accountUrl(d) },
+        rpcLink("votes", "DAO policy"),
+      ],
+    };
+  });
+
   const balances = guard({ id: "balances", title: "Balances add up" }, async () => {
     const budgets = await tracked(viewRead<Budget[]>(CONTRACT, "list_envelopes", {}));
     const tokens = [...new Set(budgets.map((b) => b.token_id))];
@@ -340,7 +408,16 @@ export async function runVerify(): Promise<VerifyReport> {
       ],
     };
   });
-  const checks = await Promise.all([keys, code, upgrades, owner, balances, reserve]);
+  const checks = await Promise.all([
+    keys,
+    code,
+    upgrades,
+    owner,
+    daoCode,
+    votes,
+    balances,
+    reserve,
+  ]);
   return { contract: CONTRACT, checks, checkedAt: Date.now(), staleFrom };
 }
 

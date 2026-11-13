@@ -3,6 +3,7 @@ import Link from "next/link";
 import { LocalTime } from "@/components/local-time";
 import { Card, ExternalLink, Pill } from "@/components/ui";
 import { StaleNotice } from "@/components/verify-stale-notice";
+import { NETWORK } from "@/lib/config";
 import { getVerifyReport } from "@/lib/verify";
 
 // Checks run on the server at request time; getVerifyReport reuses one run for 30 s.
@@ -12,15 +13,19 @@ export const metadata: Metadata = { title: "Check it yourself · Earmark" };
 /** Live, keyless checks of the deployed contract: the browser version of `make verify`. */
 export default async function VerifyPage() {
   const report = await getVerifyReport();
-  const failed = report.checks.filter((c) => !c.ok && !c.unknown).length;
+  const failed = report.checks.filter((c) => !c.ok && !c.unknown && !c.warn).length;
   const unchecked = report.checks.filter((c) => c.unknown).length;
+  const notes = report.checks.filter((c) => c.warn).length;
+  const passed = report.checks.length - notes;
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-3xl font-bold tracking-tight">Check it yourself</h1>
           {failed === 0 && unchecked === 0 ? (
-            <Pill tone="green">All {report.checks.length} checks pass</Pill>
+            <Pill tone="green">
+              {notes === 0 ? `All ${passed} checks pass` : `${passed} pass · ${notes} to know`}
+            </Pill>
           ) : failed === 0 ? (
             <Pill>
               {report.checks.length - unchecked} of {report.checks.length} pass · {unchecked} not
@@ -45,14 +50,18 @@ export default async function VerifyPage() {
               className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-full text-sm font-bold ${
                 c.ok
                   ? "bg-emerald-50 text-emerald-700"
-                  : c.unknown
-                    ? "bg-slate-100 text-slate-500"
-                    : "bg-rose-50 text-rose-700"
+                  : c.warn
+                    ? "bg-amber-50 text-amber-700"
+                    : c.unknown
+                      ? "bg-slate-100 text-slate-500"
+                      : "bg-rose-50 text-rose-700"
               }`}
               role="img"
-              aria-label={c.ok ? "Pass" : c.unknown ? "Not checked" : "Fail"}
+              aria-label={
+                c.ok ? "Pass" : c.warn ? "Good to know" : c.unknown ? "Not checked" : "Fail"
+              }
             >
-              {c.ok ? "✓" : c.unknown ? "?" : "✕"}
+              {c.ok ? "✓" : c.warn ? "!" : c.unknown ? "?" : "✕"}
             </span>
             <div className="min-w-0 space-y-1">
               <p className="font-semibold">{c.title}</p>
@@ -77,7 +86,7 @@ export default async function VerifyPage() {
         <p>
           Run{" "}
           <code className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[0.9em] text-ink">
-            make verify
+            {NETWORK === "mainnet" ? "make verify NET=mainnet" : "make verify"}
           </code>{" "}
           to check the same from your terminal, no keys needed.
         </p>
