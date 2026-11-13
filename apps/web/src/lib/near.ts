@@ -303,8 +303,13 @@ export type EarmarkEvent = {
   event: string;
   data: Record<string, unknown>;
   tx: string;
-  /** Who signed the transaction (e.g. the approver who paused someone). */
+  /**
+   * Who acted (e.g. the approver who paused someone): the account that called the contract. With
+   * fees paid by Earmark (NEP-366) that differs from the transaction's signer, the relayer.
+   */
   signer: string;
+  /** Someone else (Earmark's relayer) paid this transaction's network fee. */
+  sponsored: boolean;
   timestampNs: string;
 };
 
@@ -313,7 +318,11 @@ type AccountTxs = {
   resume_token?: string;
 };
 type TxDetail = {
-  transaction: { hash: string; signer_id: string };
+  transaction: {
+    hash: string;
+    signer_id: string;
+    actions?: { Delegate?: { delegate_action: { sender_id: string } } }[];
+  };
   receipts: {
     receipt: { receiver_id: string };
     execution_outcome: { outcome: { logs: string[] } };
@@ -373,6 +382,11 @@ export async function contractEvents({
   const events: EarmarkEvent[] = [];
   for (const tx of details) {
     const inTx: EarmarkEvent[] = [];
+    // A relayed call (NEP-366) is signed by Earmark's relayer; the member is the delegate sender.
+    const signer = tx.transaction.signer_id;
+    const actor =
+      tx.transaction.actions?.find((a) => a.Delegate)?.Delegate?.delegate_action.sender_id ??
+      signer;
     for (const r of tx.receipts) {
       if (r.receipt.receiver_id !== contract) continue;
       for (const log of r.execution_outcome.outcome.logs) {
@@ -388,7 +402,8 @@ export async function contractEvents({
             event: e.event,
             data: e.data,
             tx: tx.transaction.hash,
-            signer: tx.transaction.signer_id,
+            signer: actor,
+            sponsored: actor !== signer,
             timestampNs: time.get(tx.transaction.hash) ?? "0",
           });
         } catch {
