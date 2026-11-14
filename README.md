@@ -5,6 +5,7 @@
 Earmark gives teams in a Sputnik DAO (including Trezu-made treasuries) their own budgets, enforced by a NEAR contract with no keys.
 
 - **Track:** Social Money (`social`), NEAR HACKATHON.
+- **Demo video:** https://x.com/omkardongre598/status/2121748601789718606
 - **For judges:** [`JUDGE.md`](JUDGE.md): a 3-minute walkthrough, one command (`make verify NET=mainnet`) and what we don't claim.
 - **Mainnet:** https://earmark-mainnet-878141445235.us-central1.run.app. Contract `budgets.omkar5.near` (0 keys), owned by the Trezu treasury `earmark.sputnik-dao.near`, native USDC. Budgets, the three payment paths, the "ask to be paid" link, receipts, and since DAO vote #7 tasks (bounties) and near.com payouts.
 - **Testnet:** https://earmark-878141445235.us-central1.run.app. Everything above plus Telegram alerts and fees paid by Earmark (mainnet needs its own sponsor account and bot for these).
@@ -178,6 +179,7 @@ Working on mainnet (small run, 9 Nov, native USDC):
 - Contract `budgets.omkar5.near` (0 keys), owned by the public Trezu treasury `earmark.sputnik-dao.near`; app at https://earmark-mainnet-878141445235.us-central1.run.app.
 - `/setup` filed the setup and funding votes; Trezu showed them as normal requests and they were approved there.
 - All three payment paths with a real wallet: 0.1 USDC paid at once, 0.4 USDC after one approval, and 0.6 USDC sent to a DAO vote. The vote showed in Trezu as a "Payment Request · 0.6 USDC", was approved there, and "Check the DAO result" recorded it as paid by the DAO.
+- near.com payout (15 Nov): the near.com payee `0x5319…d4c8` (a MetaMask address, no NEAR account) waited out its 1-day delay and was applied; the lead then paid 0.2 USDC at once into its near.com balance through NEAR Intents. near.com showed $0.20 for that wallet.
 
 Not done:
 
