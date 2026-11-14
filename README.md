@@ -342,7 +342,7 @@ Live, keyless checks of `budgets.earmark.testnet`, the browser version of `make 
 - Balances add up: token held ≥ budgets, balance = available + waiting + paying, paid requests = paid out.
 - Ready for new payments: the contract has at least 0.5 NEAR free for storage. If not, the row (and the Approvals page) says how much NEAR to send it; a lead only sees that payments are paused.
 
-Each row has a "Proof" link that opens its NearBlocks pages and the raw RPC answer (`/verify/rpc/<check>`). A read that fails (e.g. a rate limit) is retried once; if it still fails the row shows "Couldn’t check this right now" in gray and isn't counted as failed. The expected DAO and code hash are in [`apps/web/src/lib/config.ts`](apps/web/src/lib/config.ts) (`EXPECTED_DAO`, `EXPECTED_CODE_HASH`; override with `NEXT_PUBLIC_DAO`, `NEXT_PUBLIC_CODE_HASH`). Update them when `lock.ts` installs new code.
+The page shows a score card (checks passed, one bar per check) and groups the rows under three questions: who controls the money, is it the real code, do the books add up. Each row lists its proof links (NearBlocks pages and the raw RPC answer, `/verify/rpc/<check>`).. A read that fails (e.g. a rate limit) is retried once; if it still fails the row shows "Couldn’t check this right now" in gray and isn't counted as failed. The expected DAO and code hash are in [`apps/web/src/lib/config.ts`](apps/web/src/lib/config.ts) (`EXPECTED_DAO`, `EXPECTED_CODE_HASH`; override with `NEXT_PUBLIC_DAO`, `NEXT_PUBLIC_CODE_HASH`). Update them when `lock.ts` installs new code.
 
 ### Set up a budget (`/setup`)
 
