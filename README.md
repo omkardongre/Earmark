@@ -352,7 +352,7 @@ Signing out or switching accounts returns to the home page and resets every scre
 
 ### Try it (no wallet)
 
-`/try` lets a visitor drive a separate sandbox contract, `try.earmark.testnet`: same code, no access keys, owned by the demo DAO. Budget 0 "Try it" has auto limit 5, one approval up to 25 (50 once `make try-limits` applies the queued change), a 1-hour period and a 10-minute approval window. Budgets 1 and 2 hold the race and paused scenes, so budget 0 stays open.
+`/try` lets a visitor drive a separate sandbox contract, `try.earmark.testnet`: same code, no access keys, owned by the demo DAO. Budget 0 "Try it" has auto limit 5, one approval up to 25 (50 once `make try-limits` applies the queued change), a 1-hour period and a 10-minute approval window. Budgets 1 and 2 hold the race and paused scenes, so budget 0 stays open. The page shows the budget left and both limits in one card, then three steps on a rail (pay, ask for more, try to break the rules); each answer shows its result and transaction.
 
 - The server signs with two testnet function-call keys: `try-lead.earmark.testnet` can only call `request_spend`, `try-council.earmark.testnet` only `approve` and `expire`, both only on the sandbox contract.
 - Visitors choose a scene; they never send amounts or payees.
